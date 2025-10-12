@@ -293,65 +293,53 @@ Object.values(CORNELL_BOX_DATA).forEach((wall) => {
   );
 });
 
-// Intersection Functions
-function calculateRayEllipsoidIntersection(
-  ray: Ray3D,
-  ellipsoid: Ellipsoid,
-  clipVal: number
-): Intersection {
-  vec3.divide(D_DIV_A_REI, ray[1], ellipsoid.radii);
-  const quadA = vec3.dot(D_DIV_A_REI, D_DIV_A_REI);
-  vec3.subtract(EM_C_REI, ray[0], ellipsoid.center);
-  vec3.divide(EM_C_DIV_A_REI, EM_C_REI, ellipsoid.radii);
-  const quadB = 2 * vec3.dot(D_DIV_A_REI, EM_C_DIV_A_REI);
-  const quadC = vec3.dot(EM_C_DIV_A_REI, EM_C_DIV_A_REI) - 1;
-  const qsolve = solveQuad(quadA, quadB, quadC);
-  for (let i = 0; i < qsolve.length; i++) {
-    const t = qsolve[i];
-    if (t >= clipVal) {
-      vec3.scaleAndAdd(TEMP_VECTOR_1, ray[0], ray[1], t);
-      return {
-        exists: true,
-        intersectionPoint: vec3.clone(TEMP_VECTOR_1),
-        distance: t,
-      };
-    }
-  }
-  return { exists: false, intersectionPoint: NaN, distance: NaN };
-}
 
 function calculateRayTriangleIntersection(
   ray: Ray3D,
   triangle: Triangle,
   clipVal: number
 ): Intersection {
-  vec3.subtract(EDGE1_RTI, triangle.vertex1, triangle.vertex0);
-  vec3.subtract(EDGE2_RTI, triangle.vertex2, triangle.vertex0);
-  const rayDir = ray[1];
-  vec3.cross(PVEC_RTI, rayDir, EDGE2_RTI);
-  const det = vec3.dot(EDGE1_RTI, PVEC_RTI);
-  if (Math.abs(det) < 1e-6) {
+  // Compute triangle edges
+  vec3.subtract(triangleEdge1, triangle.vertex1, triangle.vertex0);
+  vec3.subtract(triangleEdge2, triangle.vertex2, triangle.vertex0);
+
+  // Calculate determinant
+  const rayDirection = ray[1];
+  vec3.cross(perpendicularVector, rayDirection, triangleEdge2);
+  const determinant = vec3.dot(triangleEdge1, perpendicularVector);
+
+  // Check if ray is parallel to the triangle
+  if (Math.abs(determinant) < 1e-6) {
     return { exists: false, intersectionPoint: NaN, distance: NaN };
   }
-  const invDet = 1.0 / det;
-  vec3.subtract(TVEC_RTI, ray[0], triangle.vertex0);
-  const u = vec3.dot(TVEC_RTI, PVEC_RTI) * invDet;
+
+  const inverseDeterminant = 1.0 / determinant;
+
+  // Calculate u parameter and test bounds
+  vec3.subtract(originToVertex, ray[0], triangle.vertex0);
+  const u = vec3.dot(originToVertex, perpendicularVector) * inverseDeterminant;
   if (u < 0 || u > 1) {
     return { exists: false, intersectionPoint: NaN, distance: NaN };
   }
-  vec3.cross(QVEC_RTI, TVEC_RTI, EDGE1_RTI);
-  const v = vec3.dot(rayDir, QVEC_RTI) * invDet;
+
+  // Calculate v parameter and test bounds
+  vec3.cross(qVector, originToVertex, triangleEdge1);
+  const v = vec3.dot(rayDirection, qVector) * inverseDeterminant;
   if (v < 0 || u + v > 1) {
     return { exists: false, intersectionPoint: NaN, distance: NaN };
   }
-  const t = vec3.dot(EDGE2_RTI, QVEC_RTI) * invDet;
+
+  // Calculate t parameter and check clip value
+  const t = vec3.dot(triangleEdge2, qVector) * inverseDeterminant;
   if (t < clipVal) {
     return { exists: false, intersectionPoint: NaN, distance: NaN };
   }
-  vec3.scaleAndAdd(TEMP_VECTOR_1, ray[0], ray[1], t);
+
+  // Compute intersection point
+  vec3.scaleAndAdd(tempIntersectionPoint, ray[0], ray[1], t);
   return {
     exists: true,
-    intersectionPoint: vec3.clone(TEMP_VECTOR_1),
+    intersectionPoint: vec3.clone(tempIntersectionPoint),
     distance: t,
   };
 }

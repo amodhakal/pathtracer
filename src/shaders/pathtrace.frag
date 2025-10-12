@@ -6,6 +6,7 @@ precision mediump float;
 #define MAX_TRIANGLE_COUNT 12
 #define BOUNCE_SUCCESS_PROBABILITY 0.5
 #define CLIP_VAL 0.001
+#define MAX_TERM_COUNT 2
 
 struct Light {
     vec3 position;
@@ -14,8 +15,7 @@ struct Light {
 
 struct QuadResult {
     int termCount;
-    float term1;
-    float term2;
+    vec2 terms;
 };
 
 struct Ellipsoid {
@@ -122,23 +122,46 @@ vec3 getBounceDirection(vec3 normal, float seed) {
 }
 
 Intersect calculateRayEllipsoidIntersect(vec3 point, vec3 direction, Ellipsoid ellipsoid) {
-    // TODO
+    vec3 firstResult = direction / ellipsoid.radius;
+    vec3 secondResult = direction - ellipsoid.center;
+    vec3 thirdResult = secondResult / ellipsoid.radius;
+
+    float quadA = dot(firstResult, firstResult);
+    float quadB = 2.0 * dot(firstResult, thirdResult);
+    float quadC = dot(thirdResult, thirdResult) - 1.0;
+
+    vec3 quads = vec3(quadA, quadB, quadC);
+    QuadResult result = solveQuad(quads);
+
+    for(int idx = 0; idx < result.termCount; idx++) {
+        float term = result.terms[idx];
+        if(term < CLIP_VAL) {
+            continue;
+        }
+
+        vec3 intersect = point + direction;
+        intersect *= term;
+        return Intersect(true, ellipsoid.color, intersect, term);
+    }
+
     return Intersect(false, vec3(0.0, 0.0, 0.0), vec3(0.0, 0.0, 0.0), 0.0);
 }
 
 Intersect calculateRayTriangleIntersect(vec3 point, vec3 direction, Triangle triangle) {
+    Intersect noIntersection = Intersect(false, vec3(0.0, 0.0, 0.0), vec3(0.0, 0.0, 0.0), 0.0);
+
     // TODO
-    return Intersect(false, vec3(0.0, 0.0, 0.0), vec3(0.0, 0.0, 0.0), 0.0);
+    return noIntersection;
 }
 
 QuadResult solveQuad(vec3 quads) {
     float discriminant = pow(quads.y, 2.0) - 4.0 * quads.x * quads.z;
 
     if(discriminant < 0.0) {
-        return QuadResult(0, 0.0, 0.0);
+        return QuadResult(0, vec2(0.0, 0.0));
     } else if(discriminant == 0.0) {
         float term = -quads.y / (2.0 * quads.x);
-        return QuadResult(1, term, 0.0);
+        return QuadResult(1, vec2(term, 0.0));
     }
 
     float denominator = 0.5 / quads.x;
@@ -148,9 +171,9 @@ QuadResult solveQuad(vec3 quads) {
     float negativeTerm = denominator * (term1 - term2);
 
     if(positiveTerm > negativeTerm) {
-        return QuadResult(2, negativeTerm, positiveTerm);
+        return QuadResult(2, vec2(negativeTerm, positiveTerm));
     } else {
-        return QuadResult(2, positiveTerm, negativeTerm);
+        return QuadResult(2, vec2(positiveTerm, negativeTerm));
     }
 }
 
