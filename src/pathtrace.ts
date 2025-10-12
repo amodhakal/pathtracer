@@ -2,12 +2,33 @@ import vertexCode from "./shaders/shaders.vert";
 import fragmentCode from "./shaders/pathtrace.frag";
 import { createProgram, createShader } from "./utils";
 
+const MAX_ELLIPSOID_COUNT = 10; // Same as WebGL
+const ELLIPSOID_VEC_VALUE_COUNT = 9;
+
 const vertices = new Float32Array([-1, 1, -1, -1, 1, 1, -1, -1, 1, -1, 1, 1]);
 const eye = new Float32Array([0.0, 0.0, -0.5]);
+
 const light = {
   position: new Float32Array([0.0, 0.9999, 0.5]),
   color: new Float32Array([1.0, 1.0, 1.0]),
 };
+
+const ellipsoids = [
+  {
+    position: new Float32Array([0.0, 0.0, 0.3]),
+    radius: new Float32Array([0.3, 0.3, 0.3]),
+    color: new Float32Array([1.0, 0.8, 0.0]),
+  },
+  {
+    position: new Float32Array([0.3, 0.5, 0.2]),
+    radius: new Float32Array([0.06, 0.06, 0.06]),
+    color: new Float32Array([0.7, 0.7, 0.7]),
+  },
+];
+
+const flattenedEllipsoids = new Float32Array(
+  MAX_ELLIPSOID_COUNT * ELLIPSOID_VEC_VALUE_COUNT
+);
 
 export function pathtrace() {
   const canvas = document.getElementById("canvas") as HTMLCanvasElement;
@@ -32,6 +53,7 @@ export function pathtrace() {
   const uEye = gl.getUniformLocation(program, "u_Eye");
   const uLight_Position = gl.getUniformLocation(program, "u_Light.position");
   const uLight_Color = gl.getUniformLocation(program, "u_Light.color");
+  const uEllipsoids = gl.getUniformLocation(program, "u_Ellipsoids");
 
   canvas.width = canvas.clientWidth;
   canvas.height = canvas.clientHeight;
@@ -44,6 +66,7 @@ export function pathtrace() {
   gl.uniform3fv(uEye, eye);
   gl.uniform3fv(uLight_Position, light.position);
   gl.uniform3fv(uLight_Color, light.color);
+  gl.uniform3fv(uEllipsoids, flattenedEllipsoids);
 
   gl.drawArrays(gl.TRIANGLES, 0, 6);
 }

@@ -306,38 +306,6 @@ Object.values(CORNELL_BOX_DATA).forEach((wall) => {
   );
 });
 
-function rejectionSampling(normal: vec3) {
-  while (true) {
-    vec3.set(
-      LOCAL_DIRECTION_RS,
-      Math.random() * 2 - 1,
-      Math.random() * 2 - 1,
-      Math.random() * 2
-    );
-    if (
-      vec3.squaredLength(LOCAL_DIRECTION_RS) <= 1 &&
-      vec3.dot(DOT_CHECK_VECTOR_RS, LOCAL_DIRECTION_RS) >= 0
-    ) {
-      break;
-    }
-  }
-  vec3.normalize(LOCAL_DIRECTION_RS, LOCAL_DIRECTION_RS);
-  if (Math.abs(normal[0]) > 0.9) {
-    vec3.set(UP_VECTOR_RS, 0, 1, 0);
-  } else {
-    vec3.set(UP_VECTOR_RS, 1, 0, 0);
-  }
-  vec3.cross(TANGENT_RS, UP_VECTOR_RS, normal);
-  vec3.normalize(TANGENT_RS, TANGENT_RS);
-  vec3.cross(BINORMAL_RS, normal, TANGENT_RS);
-
-  const out = vec3.fromValues(0, 0, 0);
-  vec3.scale(out, TANGENT_RS, LOCAL_DIRECTION_RS[0]);
-  vec3.scaleAndAdd(out, out, BINORMAL_RS, LOCAL_DIRECTION_RS[1]);
-  vec3.scaleAndAdd(out, out, normal, LOCAL_DIRECTION_RS[2]);
-  return out;
-}
-
 // Intersection Functions
 function calculateRayEllipsoidIntersection(
   ray: Ray3D,
@@ -403,64 +371,62 @@ function calculateRayTriangleIntersection(
 
 // Path Tracing Logic
 function dirIllum(
-  out: vec4,
   point: vec3,
   normal: vec3,
   material: Material,
   light: LightSource,
   scene: Scene
-): void {
-  vec3.set(
-    LIGHT_POSITION_DI,
+): vec4 {
+  const lightPosition = vec3.fromValues(
     light.positionX,
     light.positionY,
     light.positionZ
   );
-  vec3.subtract(TO_LIGHT_VECTOR_DI, LIGHT_POSITION_DI, point);
-  const lightDist = vec3.length(TO_LIGHT_VECTOR_DI);
-  vec3.normalize(LIGHT_DIRECTION_DI, TO_LIGHT_VECTOR_DI);
-  let V = 1.0;
+  const toLightVector = vec3.subtract(vec3.create(), lightPosition, point);
+  const lightDist = vec3.length(toLightVector);
+  const lightDirection = vec3.normalize(vec3.create(), toLightVector);
+
   const { intersection: shadowIsect } = scene.findClosestIntersection(
-    [point, LIGHT_DIRECTION_DI],
+    [point, lightDirection],
     0.001
   );
   if (shadowIsect.exists && shadowIsect.distance < lightDist) {
-    V = 0.0;
+    return vec4.fromValues(0, 0, 0, 255); // In shadow
   }
-  if (V === 0) {
-    vec4.set(out, 0, 0, 0, 255);
-    return;
-  }
+
   const G =
-    (Math.max(0, vec3.dot(normal, LIGHT_DIRECTION_DI)) * 1.0) /
+    (Math.max(0, vec3.dot(normal, lightDirection)) * 1.0) /
     (1.0 + lightDist * lightDist);
   const r = Math.min(255, 255 * light.color[0] * material.color[0] * G);
   const g = Math.min(255, 255 * light.color[1] * material.color[1] * G);
   const b = Math.min(255, 255 * light.color[2] * material.color[2] * G);
-  vec4.set(out, r, g, b, 255);
+
+  return vec4.fromValues(r, g, b, 255);
 }
 
 function indirIllum(
-  out: vec4,
   point: vec3,
   normal: vec3,
   material: Material,
   light: LightSource,
   scene: Scene,
   depth: number
-): void {
-  vec4.set(out, 0, 0, 0, 255);
+): vec4 {
   if (depth > 1 && Math.random() > BOUNCE_PROBABILITY) {
-    return;
+    return vec4.fromValues(0, 0, 0, 255); // No indirect illumination
   }
-  BOUNCE_DIRECTION_II = rejectionSampling(normal);
-  const bounceRay: Ray3D = [point, BOUNCE_DIRECTION_II];
-  INDIRECT_RAY_COLOR_II = pathTracer(bounceRay, light, scene, depth + 1);
+
+  const bounceDirection = rejectionSampling(normal);
+  const bounceRay: Ray3D = [point, bounceDirection];
+  const indirectRayColor = pathTracer(bounceRay, light, scene, depth + 1);
+
   const weight =
-    Math.max(0, vec3.dot(normal, BOUNCE_DIRECTION_II)) / BOUNCE_PROBABILITY;
-  out[0] += INDIRECT_RAY_COLOR_II[0] * material.color[0] * weight;
-  out[1] += INDIRECT_RAY_COLOR_II[1] * material.color[1] * weight;
-  out[2] += INDIRECT_RAY_COLOR_II[2] * material.color[2] * weight;
+    Math.max(0, vec3.dot(normal, bounceDirection)) / BOUNCE_PROBABILITY;
+  const r = indirectRayColor[0] * material.color[0] * weight;
+  const g = indirectRayColor[1] * material.color[1] * weight;
+  const b = indirectRayColor[2] * material.color[2] * weight;
+
+  return vec4.fromValues(r, g, b, 255);
 }
 
 function pathTracer(
@@ -468,23 +434,21 @@ function pathTracer(
   light: LightSource,
   scene: Scene,
   depth: number
-) {
+): vec4 {
   const { intersection, object } = scene.findClosestIntersection(ray, 0.001);
   if (!intersection.exists || !object) {
-    return vec4.fromValues(0, 0, 0, 255);
+    return vec4.fromValues(0, 0, 0, 255); // Background color
   }
 
   const normal = object.calculateNormal(intersection.intersectionPoint);
-  dirIllum(
-    DIRECT_LIGHT_PT,
+  const directLight = dirIllum(
     intersection.intersectionPoint,
     normal,
     object.material,
     light,
     scene
   );
-  indirIllum(
-    INDIRECT_LIGHT_PT,
+  const indirectLight = indirIllum(
     intersection.intersectionPoint,
     normal,
     object.material,
@@ -492,8 +456,48 @@ function pathTracer(
     scene,
     depth
   );
-  const r = Math.min(255, DIRECT_LIGHT_PT[0] + INDIRECT_LIGHT_PT[0]);
-  const g = Math.min(255, DIRECT_LIGHT_PT[1] + INDIRECT_LIGHT_PT[1]);
-  const b = Math.min(255, DIRECT_LIGHT_PT[2] + INDIRECT_LIGHT_PT[2]);
+
+  const r = Math.min(255, directLight[0] + indirectLight[0]);
+  const g = Math.min(255, directLight[1] + indirectLight[1]);
+  const b = Math.min(255, directLight[2] + indirectLight[2]);
+
   return vec4.fromValues(r, g, b, 255);
+}
+
+function rejectionSampling(normal: vec3): vec3 {
+  const LOCAL_DIRECTION_RS = vec3.create();
+  const TANGENT_RS = vec3.create();
+  const BINORMAL_RS = vec3.create();
+  const UP_VECTOR_RS = vec3.create();
+  const DOT_CHECK_VECTOR_RS = vec3.fromValues(0, 0, 1);
+
+  while (true) {
+    vec3.set(
+      LOCAL_DIRECTION_RS,
+      Math.random() * 2 - 1,
+      Math.random() * 2 - 1,
+      Math.random() * 2
+    );
+    if (
+      vec3.squaredLength(LOCAL_DIRECTION_RS) <= 1 &&
+      vec3.dot(DOT_CHECK_VECTOR_RS, LOCAL_DIRECTION_RS) >= 0
+    ) {
+      break;
+    }
+  }
+  vec3.normalize(LOCAL_DIRECTION_RS, LOCAL_DIRECTION_RS);
+  if (Math.abs(normal[0]) > 0.9) {
+    vec3.set(UP_VECTOR_RS, 0, 1, 0);
+  } else {
+    vec3.set(UP_VECTOR_RS, 1, 0, 0);
+  }
+  vec3.cross(TANGENT_RS, UP_VECTOR_RS, normal);
+  vec3.normalize(TANGENT_RS, TANGENT_RS);
+  vec3.cross(BINORMAL_RS, normal, TANGENT_RS);
+
+  const out = vec3.fromValues(0, 0, 0);
+  vec3.scale(out, TANGENT_RS, LOCAL_DIRECTION_RS[0]);
+  vec3.scaleAndAdd(out, out, BINORMAL_RS, LOCAL_DIRECTION_RS[1]);
+  vec3.scaleAndAdd(out, out, normal, LOCAL_DIRECTION_RS[2]);
+  return out;
 }

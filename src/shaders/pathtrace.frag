@@ -1,6 +1,9 @@
 precision mediump float;
 
-#define MAX_SAMPLE_COUNT 10 // Needs to be known compile time
+/* Compile time values */
+#define MAX_SAMPLE_COUNT 10 
+#define MAX_ELLIPSOID_COUNT 10
+#define MAX_TRIANGLE_COUNT 12
 
 struct Light {
     vec3 position;
@@ -19,6 +22,7 @@ varying vec2 v_WindowPixels;
 /* Received from the code */
 uniform vec3 u_Eye;
 uniform Light u_Light;
+uniform vec3 u_Ellipsoids[MAX_ELLIPSOID_COUNT * 3];
 
 vec3 tracePath(vec3 rayDirection, int depth);
 QuadResult solveQuad(vec3 quads);
@@ -65,3 +69,12 @@ QuadResult solveQuad(vec3 quads) {
         return QuadResult(2, positiveTerm, negativeTerm);
     }
 }
+
+    // Example of accessing ellipsoids
+    // for (int i = 0; i < MAX_ELLIPSOID_COUNT; i++) {
+    //     vec3 position = u_Ellipsoids[i * 3];
+    //     vec3 radius = u_Ellipsoids[i * 3 + 1];
+    //     vec3 color = u_Ellipsoids[i * 3 + 2];
+
+    //     // Use position, radius, and color as needed
+    // }
