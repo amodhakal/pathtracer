@@ -39,13 +39,6 @@ type IntersectionNotFound = {
 
 type Intersection = IntersectionFound | IntersectionNotFound;
 
-interface PixelCoordinates {
-  pixelX: number;
-  pixelY: number;
-  worldX: number;
-  worldY: number;
-}
-
 interface WallData {
   triangles: Triangle3D[];
   surfaceNormal: vec3;
@@ -192,7 +185,6 @@ const TVEC_RTI = vec3.create();
 const QVEC_RTI = vec3.create();
 
 // Constants
-const BOUNCE_PROBABILITY: number = 0.5;
 
 const CORNELL_BOX_DATA: { [key: string]: WallData } = {
   leftWall: {
@@ -275,7 +267,24 @@ const CORNELL_BOX_DATA: { [key: string]: WallData } = {
     surfaceNormal: vec3.fromValues(0, 1, 0),
     material: { color: [0.8, 0.8, 0.8] },
   },
+  frontWall: {
+    triangles: [
+      [
+        [0, 0, 0],
+        [1, 0, 0],
+        [0, 1, 0],
+      ],
+      [
+        [1, 0, 0],
+        [1, 1, 0],
+        [0, 1, 0],
+      ],
+    ],
+    surfaceNormal: vec3.fromValues(0, 0, 1),
+    material: { color: [0.8, 0.8, 0.8] },
+  },
 };
+
 const scene = new Scene();
 makeYourOwnEllipsoids.forEach((e) => scene.addObject(new Ellipsoid(e)));
 Object.values(CORNELL_BOX_DATA).forEach((wall) => {

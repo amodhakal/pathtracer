@@ -5,6 +5,7 @@ precision mediump float;
 #define MAX_ELLIPSOID_COUNT 10
 #define MAX_TRIANGLE_COUNT 12
 #define BOUNCE_SUCCESS_PROBABILITY 0.5
+#define CLIP_VAL 0.001
 
 struct Light {
     vec3 position;
@@ -17,6 +18,27 @@ struct QuadResult {
     float term2;
 };
 
+struct Ellipsoid {
+    vec3 center;
+    vec3 radius;
+    vec3 color;
+};
+
+struct Triangle {
+    vec3 vertex1;
+    vec3 vertex2;
+    vec3 vertex3;
+    vec3 normal;
+    vec3 color;
+};
+
+struct Intersect {
+    bool isExisting;
+    vec3 color;
+    vec3 intersect;
+    float distance;
+};
+
 /* Received from the vertex */ 
 varying vec2 v_WindowPixels;
 
@@ -26,10 +48,13 @@ uniform Light u_Light;
 uniform vec3 u_Ellipsoids[MAX_ELLIPSOID_COUNT * 3];
 uniform float u_Time;
 
-vec3 tracePath(vec3 point, vec3 rayDirection, int depth);
-QuadResult solveQuad(vec3 quads);
+vec3 tracePath(vec3 point, vec3 direction, int depth);
+vec3 calculateDirectIllumination(vec3 point, vec3 normal, vec3 color);
 vec3 calculateIndirectIllumination(vec3 point, vec3 normal, vec3 color, int depth);
 vec3 getBounceDirection(vec3 normal, float seed);
+Intersect calculateRayEllipsoidIntersect(vec3 point, vec3 direction, Ellipsoid ellipsoid);
+Intersect calculateRayTriangleIntersect(vec3 point, vec3 direction, Triangle triangle);
+QuadResult solveQuad(vec3 quads);
 float rand(float seed);
 
 void main() {
@@ -45,32 +70,14 @@ void main() {
     gl_FragColor = vec4(finalColor, 1.0);
 }
 
-vec3 tracePath(vec3 point, vec3 rayDirection, int depth) {
+vec3 tracePath(vec3 point, vec3 direction, int depth) {
     // TODO: Implement path tracing logic
     return vec3(0.0, 0.0, 0.0);
 }
 
-QuadResult solveQuad(vec3 quads) {
-    float discriminant = pow(quads.y, 2.0) - 4.0 * quads.x * quads.z;
-
-    if(discriminant < 0.0) {
-        return QuadResult(0, 0.0, 0.0);
-    } else if(discriminant == 0.0) {
-        float term = -quads.y / (2.0 * quads.x);
-        return QuadResult(1, term, 0.0);
-    }
-
-    float denominator = 0.5 / quads.x;
-    float term1 = -quads.y;
-    float term2 = sqrt(discriminant);
-    float positiveTerm = denominator * (term1 + term2);
-    float negativeTerm = denominator * (term1 - term2);
-
-    if(positiveTerm > negativeTerm) {
-        return QuadResult(2, negativeTerm, positiveTerm);
-    } else {
-        return QuadResult(2, positiveTerm, negativeTerm);
-    }
+vec3 calculateDirectIllumination(vec3 point, vec3 normal, vec3 color) {
+    // TODO Implement
+    return vec3(0.0, 0.0, 0.0);
 }
 
 vec3 calculateIndirectIllumination(vec3 point, vec3 normal, vec3 color, int depth) {
@@ -112,6 +119,39 @@ vec3 getBounceDirection(vec3 normal, float seed) {
     result += normal * direction[2];
 
     return result;
+}
+
+Intersect calculateRayEllipsoidIntersect(vec3 point, vec3 direction, Ellipsoid ellipsoid) {
+    // TODO
+    return Intersect(false, vec3(0.0, 0.0, 0.0), vec3(0.0, 0.0, 0.0), 0.0);
+}
+
+Intersect calculateRayTriangleIntersect(vec3 point, vec3 direction, Triangle triangle) {
+    // TODO
+    return Intersect(false, vec3(0.0, 0.0, 0.0), vec3(0.0, 0.0, 0.0), 0.0);
+}
+
+QuadResult solveQuad(vec3 quads) {
+    float discriminant = pow(quads.y, 2.0) - 4.0 * quads.x * quads.z;
+
+    if(discriminant < 0.0) {
+        return QuadResult(0, 0.0, 0.0);
+    } else if(discriminant == 0.0) {
+        float term = -quads.y / (2.0 * quads.x);
+        return QuadResult(1, term, 0.0);
+    }
+
+    float denominator = 0.5 / quads.x;
+    float term1 = -quads.y;
+    float term2 = sqrt(discriminant);
+    float positiveTerm = denominator * (term1 + term2);
+    float negativeTerm = denominator * (term1 - term2);
+
+    if(positiveTerm > negativeTerm) {
+        return QuadResult(2, negativeTerm, positiveTerm);
+    } else {
+        return QuadResult(2, positiveTerm, negativeTerm);
+    }
 }
 
 float rand(float seed) {
