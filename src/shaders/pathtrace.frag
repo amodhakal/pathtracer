@@ -139,8 +139,7 @@ Intersect calculateRayEllipsoidIntersect(vec3 point, vec3 direction, Ellipsoid e
             continue;
         }
 
-        vec3 intersect = point + direction;
-        intersect *= term;
+        vec3 intersect = point + direction * term;
         return Intersect(true, ellipsoid.color, intersect, term);
     }
 
@@ -150,8 +149,35 @@ Intersect calculateRayEllipsoidIntersect(vec3 point, vec3 direction, Ellipsoid e
 Intersect calculateRayTriangleIntersect(vec3 point, vec3 direction, Triangle triangle) {
     Intersect noIntersection = Intersect(false, vec3(0.0, 0.0, 0.0), vec3(0.0, 0.0, 0.0), 0.0);
 
-    // TODO
-    return noIntersection;
+    vec3 triangleEdge1 = triangle.vertex2 - triangle.vertex1;
+    vec3 triangleEdge2 = triangle.vertex3 - triangle.vertex1;
+
+    vec3 orthogonal = cross(direction, triangleEdge1);
+    float determinant = dot(triangleEdge1, orthogonal);
+    if(abs(determinant) < CLIP_VAL) {
+        return noIntersection;
+    }
+
+    float inverseDeterminant = 1.0 / determinant;
+    vec3 pointToVertex = point - triangle.vertex1;
+    float uValue = dot(pointToVertex, orthogonal) * inverseDeterminant;
+    if(uValue < 0.0 || uValue > 1.0) {
+        return noIntersection;
+    }
+
+    vec3 crossVector = cross(pointToVertex, triangleEdge1);
+    float vValue = dot(direction, crossVector) * inverseDeterminant;
+    if(vValue < 0.0 || vValue > 1.0) {
+        return noIntersection;
+    }
+
+    float term = dot(triangleEdge2, crossVector) * inverseDeterminant;
+    if(term < CLIP_VAL) {
+        return noIntersection;
+    }
+
+    vec3 intersect = point + direction * term;
+    return Intersect(true, triangle.color, intersect, term);
 }
 
 QuadResult solveQuad(vec3 quads) {

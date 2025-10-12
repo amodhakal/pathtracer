@@ -156,33 +156,12 @@ class Scene {
 }
 
 // Temp vectors to avoid allocations in critical loops
-const TEMP_VECTOR_1 = vec3.create();
-
-const LOCAL_DIRECTION_RS = vec3.create();
-const TANGENT_RS = vec3.create();
-const BINORMAL_RS = vec3.create();
-const UP_VECTOR_RS = vec3.create();
-const DOT_CHECK_VECTOR_RS = vec3.fromValues(0, 0, 1);
-
-const LIGHT_POSITION_DI = vec3.create();
-const TO_LIGHT_VECTOR_DI = vec3.create();
-const LIGHT_DIRECTION_DI = vec3.create();
-
-let BOUNCE_DIRECTION_II = vec3.create();
-let INDIRECT_RAY_COLOR_II = vec4.create();
-
-const DIRECT_LIGHT_PT = vec4.create();
-const INDIRECT_LIGHT_PT = vec4.create();
-
-const D_DIV_A_REI = vec3.create();
-const EM_C_REI = vec3.create();
-const EM_C_DIV_A_REI = vec3.create();
-
-const EDGE1_RTI = vec3.create();
-const EDGE2_RTI = vec3.create();
-const PVEC_RTI = vec3.create();
-const TVEC_RTI = vec3.create();
-const QVEC_RTI = vec3.create();
+const triangleEdge1 = vec3.create();
+const triangleEdge2 = vec3.create();
+const perpendicularVector = vec3.create();
+const originToVertex = vec3.create();
+const qVector = vec3.create();
+const tempIntersectionPoint = vec3.create();
 
 // Constants
 
@@ -293,57 +272,6 @@ Object.values(CORNELL_BOX_DATA).forEach((wall) => {
   );
 });
 
-
-function calculateRayTriangleIntersection(
-  ray: Ray3D,
-  triangle: Triangle,
-  clipVal: number
-): Intersection {
-  // Compute triangle edges
-  vec3.subtract(triangleEdge1, triangle.vertex1, triangle.vertex0);
-  vec3.subtract(triangleEdge2, triangle.vertex2, triangle.vertex0);
-
-  // Calculate determinant
-  const rayDirection = ray[1];
-  vec3.cross(perpendicularVector, rayDirection, triangleEdge2);
-  const determinant = vec3.dot(triangleEdge1, perpendicularVector);
-
-  // Check if ray is parallel to the triangle
-  if (Math.abs(determinant) < 1e-6) {
-    return { exists: false, intersectionPoint: NaN, distance: NaN };
-  }
-
-  const inverseDeterminant = 1.0 / determinant;
-
-  // Calculate u parameter and test bounds
-  vec3.subtract(originToVertex, ray[0], triangle.vertex0);
-  const u = vec3.dot(originToVertex, perpendicularVector) * inverseDeterminant;
-  if (u < 0 || u > 1) {
-    return { exists: false, intersectionPoint: NaN, distance: NaN };
-  }
-
-  // Calculate v parameter and test bounds
-  vec3.cross(qVector, originToVertex, triangleEdge1);
-  const v = vec3.dot(rayDirection, qVector) * inverseDeterminant;
-  if (v < 0 || u + v > 1) {
-    return { exists: false, intersectionPoint: NaN, distance: NaN };
-  }
-
-  // Calculate t parameter and check clip value
-  const t = vec3.dot(triangleEdge2, qVector) * inverseDeterminant;
-  if (t < clipVal) {
-    return { exists: false, intersectionPoint: NaN, distance: NaN };
-  }
-
-  // Compute intersection point
-  vec3.scaleAndAdd(tempIntersectionPoint, ray[0], ray[1], t);
-  return {
-    exists: true,
-    intersectionPoint: vec3.clone(tempIntersectionPoint),
-    distance: t,
-  };
-}
-
 // Path Tracing Logic
 function dirIllum(
   point: vec3,
@@ -378,7 +306,6 @@ function dirIllum(
 
   return vec4.fromValues(r, g, b, 255);
 }
-
 
 function pathTracer(
   ray: Ray3D,
