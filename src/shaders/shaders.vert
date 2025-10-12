@@ -1,10 +1,12 @@
+#version 300 es
+
 // Received from program
-attribute vec2 a_Position; // The position of the vertex
+in vec2 a_Position; 
 
 // Send to fragment shaders
-varying vec2 v_WindowPixels;
+out vec2 v_WindowPixels;
 
 void main() {
     v_WindowPixels = a_Position;
-    gl_Position = vec4(a_Position, 0.0, 1.0);
+    gl_Position = vec4(a_Position, 0.0f, 1.0f);
 }

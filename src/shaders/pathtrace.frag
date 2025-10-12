@@ -1,7 +1,8 @@
+#version 300 es
+
 precision mediump float;
 
 /* Compile time values */
-#define MAX_TERM_COUNT 2
 #define MAX_TERM_COUNT 2
 #define MAX_BOUNCES 100
 #define MAX_SAMPLE_COUNT 10 
@@ -45,7 +46,8 @@ struct Intersect {
 };
 
 /* Received from the vertex */ 
-varying vec2 v_WindowPixels;
+in vec2 v_WindowPixels;
+out vec4 outColor;
 
 /* Received from the code */
 uniform vec3 u_Eye;
@@ -65,31 +67,31 @@ QuadResult solveQuad(vec3 quads);
 float rand(float seed);
 
 void main() {
-    vec3 pixelPosition = vec3(u_Eye.x, u_Eye.y, u_Eye.z + 0.5);
+    vec3 pixelPosition = vec3(u_Eye.x, u_Eye.y, u_Eye.z + 0.5f);
     vec3 rayDirection = normalize(pixelPosition - u_Eye);
-    vec3 finalColor = vec3(0.0, 0.0, 0.0);
+    vec3 finalColor = vec3(0.0f, 0.0f, 0.0f);
     for(int currentSample = 0; currentSample < MAX_SAMPLE_COUNT; currentSample++) {
         vec3 currentColor = tracePath(u_Eye, rayDirection, 0);
         finalColor += currentColor;
     }
 
     finalColor /= float(MAX_SAMPLE_COUNT);
-    gl_FragColor = vec4(finalColor, 1.0);
+    outColor = vec4(finalColor, 1.0f);
 }
 
 vec3 tracePath(vec3 point, vec3 direction, int depth) {
     Intersect intersect = findClosestIntersect(point, direction);
     if(!intersect.isExisting) {
-        return vec3(0.0, 0.0, 0.0); // Return black
+        return vec3(0.0f, 0.0f, 0.0f); // Return black
     }
 
     vec3 directLight = calculateDirectIllumination(intersect.intersect, intersect.normal, intersect.color);
     vec3 indirectLight = calculateIndirectIllumination(intersect.intersect, intersect.normal, intersect.color, depth + 1);
 
-    float red = min(255.0, directLight[0] + indirectLight[0]);
-    float blue = min(255.0, directLight[1] + indirectLight[1]);
-    float green = min(255.0, directLight[2] + indirectLight[2]);
-    
+    float red = min(255.0f, directLight[0] + indirectLight[0]);
+    float blue = min(255.0f, directLight[1] + indirectLight[1]);
+    float green = min(255.0f, directLight[2] + indirectLight[2]);
+
     vec3 finalColor = vec3(red, blue, green);
     return finalColor;
 }
@@ -102,16 +104,16 @@ vec3 calculateDirectIllumination(vec3 point, vec3 normal, vec3 color) {
     Intersect intersect = findClosestIntersect(point, lightDirection);
     if(intersect.isExisting && intersect.distance < lightDistance) {
         // Shadow
-        return vec3(0.0, 0.0, 0.0);
+        return vec3(0.0f, 0.0f, 0.0f);
     }
 
-    float numerator = max(dot(normal, lightDirection), 0.0);
-    float denominator = 1.0 + lightDistance * lightDistance;
+    float numerator = max(dot(normal, lightDirection), 0.0f);
+    float denominator = 1.0f + lightDistance * lightDistance;
     float weight = numerator / denominator;
 
-    float red = min(255.0, 255.0 * u_Light.color[0] * color[0] * weight);
-    float blue = min(255.0, 255.0 * u_Light.color[1] * color[1] * weight);
-    float green = min(255.0, 255.0 * u_Light.color[2] * color[2] * weight);
+    float red = min(255.0f, 255.0f * u_Light.color[0] * color[0] * weight);
+    float blue = min(255.0f, 255.0f * u_Light.color[1] * color[1] * weight);
+    float green = min(255.0f, 255.0f * u_Light.color[2] * color[2] * weight);
     vec3 finalColor = vec3(red, blue, green);
 
     return finalColor;
@@ -120,13 +122,13 @@ vec3 calculateDirectIllumination(vec3 point, vec3 normal, vec3 color) {
 vec3 calculateIndirectIllumination(vec3 point, vec3 normal, vec3 color, int depth) {
     float rand = rand(float(depth));
     if(depth > 0 && rand > BOUNCE_SUCCESS_PROBABILITY) {
-        return vec3(0.0, 0.0, 0.0);
+        return vec3(0.0f, 0.0f, 0.0f);
     }
 
     vec3 bounceDirection = getBounceDirection(normal, rand);
     vec3 indirectColor = tracePath(point, bounceDirection, depth + 1);
 
-    float weight = max(dot(normal, bounceDirection) / BOUNCE_SUCCESS_PROBABILITY, 0.0);
+    float weight = max(dot(normal, bounceDirection) / BOUNCE_SUCCESS_PROBABILITY, 0.0f);
     vec3 finalColor = indirectColor * color * weight;
     return finalColor;
 }
@@ -143,8 +145,8 @@ vec3 getBounceDirection(vec3 normal, float seed) {
         float thirdRand = rand(secondRand);
         direction = vec3(firstRand, secondRand, thirdRand);
 
-        isSquareLengthLessThanUnit = pow(length(direction), 2.0) <= 1.0;
-        isValidVectorDirection = dot(vec3(0.0, 0.0, 0.1), direction) >= 0.0;
+        isSquareLengthLessThanUnit = pow(length(direction), 2.0f) <= 1.0f;
+        isValidVectorDirection = dot(vec3(0.0f, 0.0f, 0.1f), direction) >= 0.0f;
 
         if(isSquareLengthLessThanUnit && isValidVectorDirection) {
             isValidValue = true;
@@ -152,11 +154,11 @@ vec3 getBounceDirection(vec3 normal, float seed) {
     }
 
     if(!isValidValue) {
-        return vec3(0.0, 0.0, 0.0);
+        return vec3(0.0f, 0.0f, 0.0f);
     }
 
     direction = normalize(direction);
-    vec3 up = abs(normal[0]) > 0.9 ? vec3(0.0, 1.0, 0.0) : vec3(1.0, 0.0, 0.0);
+    vec3 up = abs(normal[0]) > 0.9f ? vec3(0.0f, 1.0f, 0.0f) : vec3(1.0f, 0.0f, 0.0f);
     vec3 tangent = (cross(up, normal));
     vec3 binormial = cross(normal, tangent);
 
@@ -173,8 +175,8 @@ Intersect calculateRayEllipsoidIntersect(vec3 point, vec3 direction, Ellipsoid e
     vec3 thirdResult = secondResult / ellipsoid.radius;
 
     float quadA = dot(firstResult, firstResult);
-    float quadB = 2.0 * dot(firstResult, thirdResult);
-    float quadC = dot(thirdResult, thirdResult) - 1.0;
+    float quadB = 2.0f * dot(firstResult, thirdResult);
+    float quadC = dot(thirdResult, thirdResult) - 1.0f;
 
     vec3 quads = vec3(quadA, quadB, quadC);
     QuadResult result = solveQuad(quads);
@@ -190,14 +192,14 @@ Intersect calculateRayEllipsoidIntersect(vec3 point, vec3 direction, Ellipsoid e
         }
 
         vec3 intersect = point + direction * term;
-        return Intersect(true, term, ellipsoid.color, intersect, vec3(0.0, 0.0, 0.0));
+        return Intersect(true, term, ellipsoid.color, intersect, vec3(0.0f, 0.0f, 0.0f));
     }
 
-    return Intersect(false, 0.0, vec3(0.0, 0.0, 0.0), vec3(0.0, 0.0, 0.0), vec3(0.0, 0.0, 0.0));
+    return Intersect(false, 0.0f, vec3(0.0f, 0.0f, 0.0f), vec3(0.0f, 0.0f, 0.0f), vec3(0.0f, 0.0f, 0.0f));
 }
 
 Intersect calculateRayTriangleIntersect(vec3 point, vec3 direction, Triangle triangle) {
-    Intersect noIntersection = Intersect(false, 0.0, vec3(0.0, 0.0, 0.0), vec3(0.0, 0.0, 0.0), vec3(0.0, 0.0, 0.0));
+    Intersect noIntersection = Intersect(false, 0.0f, vec3(0.0f, 0.0f, 0.0f), vec3(0.0f, 0.0f, 0.0f), vec3(0.0f, 0.0f, 0.0f));
 
     vec3 triangleEdge1 = triangle.vertex2 - triangle.vertex1;
     vec3 triangleEdge2 = triangle.vertex3 - triangle.vertex1;
@@ -208,16 +210,16 @@ Intersect calculateRayTriangleIntersect(vec3 point, vec3 direction, Triangle tri
         return noIntersection;
     }
 
-    float inverseDeterminant = 1.0 / determinant;
+    float inverseDeterminant = 1.0f / determinant;
     vec3 pointToVertex = point - triangle.vertex1;
     float uValue = dot(pointToVertex, orthogonal) * inverseDeterminant;
-    if(uValue < 0.0 || uValue > 1.0) {
+    if(uValue < 0.0f || uValue > 1.0f) {
         return noIntersection;
     }
 
     vec3 crossVector = cross(pointToVertex, triangleEdge1);
     float vValue = dot(direction, crossVector) * inverseDeterminant;
-    if(vValue < 0.0 || vValue > 1.0) {
+    if(vValue < 0.0f || vValue > 1.0f) {
         return noIntersection;
     }
 
@@ -227,12 +229,12 @@ Intersect calculateRayTriangleIntersect(vec3 point, vec3 direction, Triangle tri
     }
 
     vec3 intersect = point + direction * term;
-    return Intersect(true, term, triangle.color, intersect, vec3(0.0, 0.0, 0.0));
+    return Intersect(true, term, triangle.color, intersect, vec3(0.0f, 0.0f, 0.0f));
 }
 
 Intersect findClosestIntersect(vec3 point, vec3 direction) {
-    Intersect closestIntersect = Intersect(false, 0.0, vec3(0.0, 0.0, 0.0), vec3(0.0, 0.0, 0.0), vec3(0.0, 0.0, 0.0));
-    float closestDistance = 1e20;
+    Intersect closestIntersect = Intersect(false, 0.0f, vec3(0.0f, 0.0f, 0.0f), vec3(0.0f, 0.0f, 0.0f), vec3(0.0f, 0.0f, 0.0f));
+    float closestDistance = 1e20f;
 
     for(int idx = 0; idx < TRIANGLE_COUNT; idx++) {
         int baseIdx = idx * TRIANGLE_VECTORS;
@@ -278,16 +280,16 @@ Intersect findClosestIntersect(vec3 point, vec3 direction) {
 }
 
 QuadResult solveQuad(vec3 quads) {
-    float discriminant = pow(quads.y, 2.0) - 4.0 * quads.x * quads.z;
+    float discriminant = pow(quads.y, 2.0f) - 4.0f * quads.x * quads.z;
 
-    if(discriminant < 0.0) {
-        return QuadResult(0, vec2(0.0, 0.0));
-    } else if(discriminant == 0.0) {
-        float term = -quads.y / (2.0 * quads.x);
-        return QuadResult(1, vec2(term, 0.0));
+    if(discriminant < 0.0f) {
+        return QuadResult(0, vec2(0.0f, 0.0f));
+    } else if(discriminant == 0.0f) {
+        float term = -quads.y / (2.0f * quads.x);
+        return QuadResult(1, vec2(term, 0.0f));
     }
 
-    float denominator = 0.5 / quads.x;
+    float denominator = 0.5f / quads.x;
     float term1 = -quads.y;
     float term2 = sqrt(discriminant);
     float positiveTerm = denominator * (term1 + term2);
@@ -302,5 +304,5 @@ QuadResult solveQuad(vec3 quads) {
 
 float rand(float seed) {
     vec3 inputs = vec3(v_WindowPixels, u_Time * seed);
-    return fract(sin(dot(inputs, vec3(12.9898, 78.233, 45.164))) * 43758.5453123);
+    return fract(sin(dot(inputs, vec3(12.9898f, 78.233f, 45.164f))) * 43758.5453123f);
 }
