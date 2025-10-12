@@ -4,6 +4,10 @@ import { createProgram, createShader } from "./utils";
 
 const vertices = new Float32Array([-1, 1, -1, -1, 1, 1, -1, -1, 1, -1, 1, 1]);
 const eye = new Float32Array([0.0, 0.0, -0.5]);
+const light = {
+  position: new Float32Array([0.0, 0.9999, 0.5]),
+  color: new Float32Array([1.0, 1.0, 1.0]),
+};
 
 export function pathtrace() {
   const canvas = document.getElementById("canvas") as HTMLCanvasElement;
@@ -25,7 +29,9 @@ export function pathtrace() {
   gl.enableVertexAttribArray(positionAttributeLocation);
   gl.vertexAttribPointer(positionAttributeLocation, 2, gl.FLOAT, false, 0, 0);
 
-  const eyeLocation = gl.getUniformLocation(program, "u_Eye");
+  const uEye = gl.getUniformLocation(program, "u_Eye");
+  const uLight_Position = gl.getUniformLocation(program, "u_Light.position");
+  const uLight_Color = gl.getUniformLocation(program, "u_Light.color");
 
   canvas.width = canvas.clientWidth;
   canvas.height = canvas.clientHeight;
@@ -35,7 +41,9 @@ export function pathtrace() {
   gl.clear(gl.COLOR_BUFFER_BIT);
   gl.useProgram(program);
 
-  gl.uniform3fv(eyeLocation, eye);
+  gl.uniform3fv(uEye, eye);
+  gl.uniform3fv(uLight_Position, light.position);
+  gl.uniform3fv(uLight_Color, light.color);
 
   gl.drawArrays(gl.TRIANGLES, 0, 6);
 }

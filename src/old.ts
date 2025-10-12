@@ -175,8 +175,8 @@ const LIGHT_POSITION_DI = vec3.create();
 const TO_LIGHT_VECTOR_DI = vec3.create();
 const LIGHT_DIRECTION_DI = vec3.create();
 
-const BOUNCE_DIRECTION_II = vec3.create();
-const INDIRECT_RAY_COLOR_II = vec4.create();
+let BOUNCE_DIRECTION_II = vec3.create();
+let INDIRECT_RAY_COLOR_II = vec4.create();
 
 const DIRECT_LIGHT_PT = vec4.create();
 const INDIRECT_LIGHT_PT = vec4.create();
@@ -193,21 +193,6 @@ const QVEC_RTI = vec3.create();
 
 // Constants
 const BOUNCE_PROBABILITY: number = 0.5;
-const WINDOW_Z: number = 0;
-const WINDOW_LEFT: number = 0,
-  WINDOW_RIGHT: number = 1;
-const WINDOW_BOTTOM: number = 0,
-  WINDOW_TOP: number = 1;
-
-// Scene Data
-const light: LightSource = {
-  positionX: 0.5,
-  positionY: 0.9999999999999,
-  positionZ: 0.5,
-  color: [1, 1, 1],
-};
-
-let Eye: vec3 = vec3.fromValues(0.5, 0.5, -0.5);
 
 const CORNELL_BOX_DATA: { [key: string]: WallData } = {
   leftWall: {
@@ -321,41 +306,7 @@ Object.values(CORNELL_BOX_DATA).forEach((wall) => {
   );
 });
 
-// Utility Functions
-function solveQuad(a: number, b: number, c: number): number[] {
-  const discr: number = b * b - 4 * a * c;
-  if (discr < 0) {
-    return [];
-  } else if (discr == 0) {
-    return [-b / (2 * a)];
-  } else {
-    const denom = 0.5 / a;
-    const term1 = -b;
-    const term2 = Math.sqrt(discr);
-    const tp = denom * (term1 + term2);
-    const tm = denom * (term1 - term2);
-    if (tm < tp) return [tm, tp];
-    else return [tp, tm];
-  }
-}
-
-function randPermutation(n: number): number[] {
-  const array: number[] = new Array(n);
-  let bagSize: number = n,
-    temp: number,
-    randChoice: number;
-  for (let i = 0; i < n; i++) array[i] = i;
-  while (bagSize !== 0) {
-    randChoice = Math.floor(Math.random() * bagSize);
-    bagSize--;
-    temp = array[bagSize];
-    array[bagSize] = array[randChoice];
-    array[randChoice] = temp;
-  }
-  return array;
-}
-
-function rejectionSampling(out: vec3, normal: vec3): void {
+function rejectionSampling(normal: vec3) {
   while (true) {
     vec3.set(
       LOCAL_DIRECTION_RS,
@@ -379,9 +330,12 @@ function rejectionSampling(out: vec3, normal: vec3): void {
   vec3.cross(TANGENT_RS, UP_VECTOR_RS, normal);
   vec3.normalize(TANGENT_RS, TANGENT_RS);
   vec3.cross(BINORMAL_RS, normal, TANGENT_RS);
+
+  const out = vec3.fromValues(0, 0, 0);
   vec3.scale(out, TANGENT_RS, LOCAL_DIRECTION_RS[0]);
   vec3.scaleAndAdd(out, out, BINORMAL_RS, LOCAL_DIRECTION_RS[1]);
   vec3.scaleAndAdd(out, out, normal, LOCAL_DIRECTION_RS[2]);
+  return out;
 }
 
 // Intersection Functions
@@ -499,9 +453,9 @@ function indirIllum(
   if (depth > 1 && Math.random() > BOUNCE_PROBABILITY) {
     return;
   }
-  rejectionSampling(BOUNCE_DIRECTION_II, normal);
+  BOUNCE_DIRECTION_II = rejectionSampling(normal);
   const bounceRay: Ray3D = [point, BOUNCE_DIRECTION_II];
-  pathTracer(INDIRECT_RAY_COLOR_II, bounceRay, light, scene, depth + 1);
+  INDIRECT_RAY_COLOR_II = pathTracer(bounceRay, light, scene, depth + 1);
   const weight =
     Math.max(0, vec3.dot(normal, BOUNCE_DIRECTION_II)) / BOUNCE_PROBABILITY;
   out[0] += INDIRECT_RAY_COLOR_II[0] * material.color[0] * weight;
@@ -510,17 +464,16 @@ function indirIllum(
 }
 
 function pathTracer(
-  out: vec4,
   ray: Ray3D,
   light: LightSource,
   scene: Scene,
   depth: number
-): void {
+) {
   const { intersection, object } = scene.findClosestIntersection(ray, 0.001);
   if (!intersection.exists || !object) {
-    vec4.set(out, 0, 0, 0, 255);
-    return;
+    return vec4.fromValues(0, 0, 0, 255);
   }
+
   const normal = object.calculateNormal(intersection.intersectionPoint);
   dirIllum(
     DIRECT_LIGHT_PT,
@@ -542,83 +495,5 @@ function pathTracer(
   const r = Math.min(255, DIRECT_LIGHT_PT[0] + INDIRECT_LIGHT_PT[0]);
   const g = Math.min(255, DIRECT_LIGHT_PT[1] + INDIRECT_LIGHT_PT[1]);
   const b = Math.min(255, DIRECT_LIGHT_PT[2] + INDIRECT_LIGHT_PT[2]);
-  vec4.set(out, r, g, b, 255);
+  return vec4.fromValues(r, g, b, 255);
 }
-
-// Rendering
-function getPixelLocat(
-  pixelNum: number,
-  w: number,
-  h: number
-): PixelCoordinates {
-  const y = Math.floor(pixelNum / w);
-  const x = pixelNum - y * w;
-  const wx = WINDOW_LEFT + (x / w) * (WINDOW_RIGHT - WINDOW_LEFT);
-  const wy = WINDOW_TOP + (y / h) * (WINDOW_BOTTOM - WINDOW_TOP);
-  return { pixelX: x, pixelY: y, worldX: wx, worldY: wy };
-}
-
-function pathTracingRayCast(context: CanvasRenderingContext2D): void {
-  const w = context.canvas.width;
-  const h = context.canvas.height;
-  const numPixels = w * h;
-  const imagedata = context.getImageData(0, 0, w, h);
-  const pixelColors = new Array(numPixels).fill(null).map(() => vec4.create());
-  const samples = new Array(numPixels).fill(0);
-  const MAX_SAMPLES = 256;
-  let currentSample = 0;
-  const pathColor = vec4.create();
-  const pixelWorldPos = vec3.create();
-  const rayDir = vec3.create();
-
-  function renderPass(): void {
-    if (currentSample >= MAX_SAMPLES) {
-      console.log("Rendering complete.");
-      return;
-    }
-    const pixelOrder = randPermutation(numPixels);
-    for (let i = 0; i < numPixels; i++) {
-      const pixelIndex = pixelOrder[i];
-      const pixelLocat = getPixelLocat(pixelIndex, w, h);
-      const wx = pixelLocat.worldX + (Math.random() - 0.5) / w;
-      const wy = pixelLocat.worldY + (Math.random() - 0.5) / h;
-      vec3.set(pixelWorldPos, wx, wy, WINDOW_Z);
-      vec3.subtract(rayDir, pixelWorldPos, Eye);
-      vec3.normalize(rayDir, rayDir);
-      pathTracer(pathColor, [Eye, rayDir], light, scene, 0);
-      vec4.add(pixelColors[pixelIndex], pixelColors[pixelIndex], pathColor);
-      samples[pixelIndex]++;
-      const numSamples = samples[pixelIndex];
-      const imgDataIndex = (pixelLocat.pixelY * w + pixelLocat.pixelX) * 4;
-      imagedata.data[imgDataIndex] = pixelColors[pixelIndex][0] / numSamples;
-      imagedata.data[imgDataIndex + 1] =
-        pixelColors[pixelIndex][1] / numSamples;
-      imagedata.data[imgDataIndex + 2] =
-        pixelColors[pixelIndex][2] / numSamples;
-    }
-    context.putImageData(imagedata, 0, 0);
-    currentSample++;
-    console.log(`Sample ${currentSample}/${MAX_SAMPLES}`);
-    requestAnimationFrame(renderPass);
-  }
-  for (let i = 3; i < imagedata.data.length; i += 4) {
-    imagedata.data[i] = 255;
-  }
-  requestAnimationFrame(renderPass);
-}
-
-function main(): void {
-  const canvas = document.querySelector("#canvas") as HTMLCanvasElement | null;
-  if (!canvas) {
-    console.error("Canvas element not found!");
-    return;
-  }
-  const context = canvas.getContext("2d");
-  if (!context) {
-    console.error("Could not get 2D context from canvas!");
-    return;
-  }
-  pathTracingRayCast(context);
-}
-
-window.onload = main;
