@@ -4,6 +4,7 @@ precision mediump float;
 #define MAX_SAMPLE_COUNT 10 
 #define MAX_ELLIPSOID_COUNT 10
 #define MAX_TRIANGLE_COUNT 12
+#define BOUNCE_SUCCESS_PROBABILITY 0.5
 
 struct Light {
     vec3 position;
@@ -23,16 +24,20 @@ varying vec2 v_WindowPixels;
 uniform vec3 u_Eye;
 uniform Light u_Light;
 uniform vec3 u_Ellipsoids[MAX_ELLIPSOID_COUNT * 3];
+uniform float u_Time;
 
-vec3 tracePath(vec3 rayDirection, int depth);
+vec3 tracePath(vec3 point, vec3 rayDirection, int depth);
 QuadResult solveQuad(vec3 quads);
+vec3 calculateIndirectIllumination(vec3 point, vec3 normal, vec3 color, int depth);
+vec3 getBounceDirection(vec3 normal, float seed);
+float rand(float seed);
 
 void main() {
     vec3 pixelPosition = vec3(u_Eye.x, u_Eye.y, u_Eye.z + 0.5);
     vec3 rayDirection = normalize(pixelPosition - u_Eye);
     vec3 finalColor = vec3(0.0, 0.0, 0.0);
     for(int currentSample = 0; currentSample < MAX_SAMPLE_COUNT; currentSample++) {
-        vec3 currentColor = tracePath(rayDirection, 0);
+        vec3 currentColor = tracePath(u_Eye, rayDirection, 0);
         finalColor += currentColor;
     }
 
@@ -40,9 +45,8 @@ void main() {
     gl_FragColor = vec4(finalColor, 1.0);
 }
 
-vec3 tracePath(vec3 rayDirection, int depth) {
-    // TODO
-
+vec3 tracePath(vec3 point, vec3 rayDirection, int depth) {
+    // TODO: Implement path tracing logic
     return vec3(0.0, 0.0, 0.0);
 }
 
@@ -52,8 +56,7 @@ QuadResult solveQuad(vec3 quads) {
     if(discriminant < 0.0) {
         return QuadResult(0, 0.0, 0.0);
     } else if(discriminant == 0.0) {
-        float term = -quads.y;
-        term /= 2.0 * quads.x;
+        float term = -quads.y / (2.0 * quads.x);
         return QuadResult(1, term, 0.0);
     }
 
@@ -70,11 +73,48 @@ QuadResult solveQuad(vec3 quads) {
     }
 }
 
-    // Example of accessing ellipsoids
-    // for (int i = 0; i < MAX_ELLIPSOID_COUNT; i++) {
-    //     vec3 position = u_Ellipsoids[i * 3];
-    //     vec3 radius = u_Ellipsoids[i * 3 + 1];
-    //     vec3 color = u_Ellipsoids[i * 3 + 2];
+vec3 calculateIndirectIllumination(vec3 point, vec3 normal, vec3 color, int depth) {
+    float rand = rand(float(depth));
+    if(depth > 0 && rand > BOUNCE_SUCCESS_PROBABILITY) {
+        return vec3(0.0, 0.0, 0.0);
+    }
 
-    //     // Use position, radius, and color as needed
-    // }
+    vec3 bounceDirection = getBounceDirection(normal, rand);
+    vec3 indirectColor = tracePath(point, bounceDirection, depth + 1);
+
+    float weight = max(dot(normal, bounceDirection) / BOUNCE_SUCCESS_PROBABILITY, 0.0);
+    vec3 finalColor = indirectColor * color * weight;
+    return finalColor;
+}
+
+vec3 getBounceDirection(vec3 normal, float seed) {
+    vec3 direction;
+    bool isSquareLengthLessThanUnit;
+    bool isValidVectorDirection;
+
+    do {
+        float firstRand = rand(seed);
+        float secondRand = rand(firstRand);
+        float thirdRand = rand(secondRand);
+        direction = vec3(firstRand, secondRand, thirdRand);
+
+        isSquareLengthLessThanUnit = pow(length(direction), 2.0) <= 1.0;
+        isValidVectorDirection = dot(vec3(0.0, 0.0, 0.1), direction) >= 0.0;
+    } while(!isSquareLengthLessThanUnit || !isValidVectorDirection);
+
+    direction = normalize(direction);
+    vec3 up = abs(normal[0]) > 0.9 ? vec3(0.0, 1.0, 0.0) : vec3(1.0, 0.0, 0.0);
+    vec3 tangent = (cross(up, normal));
+    vec3 binormial = cross(normal, tangent);
+
+    vec3 result = tangent * direction[0];
+    result += binormial * direction[1];
+    result += normal * direction[2];
+
+    return result;
+}
+
+float rand(float seed) {
+    vec3 inputs = vec3(v_WindowPixels, u_Time * seed);
+    return fract(sin(dot(inputs, vec3(12.9898, 78.233, 45.164))) * 43758.5453123);
+}

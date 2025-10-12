@@ -7,6 +7,8 @@ const ELLIPSOID_VEC_VALUE_COUNT = 9;
 
 const vertices = new Float32Array([-1, 1, -1, -1, 1, 1, -1, -1, 1, -1, 1, 1]);
 const eye = new Float32Array([0.0, 0.0, -0.5]);
+const time = Date.now()
+console.log(time)
 
 const light = {
   position: new Float32Array([0.0, 0.9999, 0.5]),
@@ -54,6 +56,7 @@ export function pathtrace() {
   const uLight_Position = gl.getUniformLocation(program, "u_Light.position");
   const uLight_Color = gl.getUniformLocation(program, "u_Light.color");
   const uEllipsoids = gl.getUniformLocation(program, "u_Ellipsoids");
+  const uTime = gl.getUniformLocation(program, "u_Time")
 
   canvas.width = canvas.clientWidth;
   canvas.height = canvas.clientHeight;
@@ -67,6 +70,7 @@ export function pathtrace() {
   gl.uniform3fv(uLight_Position, light.position);
   gl.uniform3fv(uLight_Color, light.color);
   gl.uniform3fv(uEllipsoids, flattenedEllipsoids);
+
 
   gl.drawArrays(gl.TRIANGLES, 0, 6);
 }

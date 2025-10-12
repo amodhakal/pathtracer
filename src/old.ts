@@ -276,28 +276,6 @@ const CORNELL_BOX_DATA: { [key: string]: WallData } = {
     material: { color: [0.8, 0.8, 0.8] },
   },
 };
-
-const makeYourOwnEllipsoids: EllipsoidShape[] = [
-  {
-    centerX: 0.5,
-    centerY: 0.5,
-    centerZ: 0.3,
-    radiusX: 0.15,
-    radiusY: 0.15,
-    radiusZ: 0.15,
-    color: [1.0, 0.8, 0.0],
-  },
-  {
-    centerX: 0.3,
-    centerY: 0.5,
-    centerZ: 0.25,
-    radiusX: 0.03,
-    radiusY: 0.03,
-    radiusZ: 0.03,
-    color: [0.7, 0.7, 0.7],
-  },
-];
-
 const scene = new Scene();
 makeYourOwnEllipsoids.forEach((e) => scene.addObject(new Ellipsoid(e)));
 Object.values(CORNELL_BOX_DATA).forEach((wall) => {
@@ -404,30 +382,6 @@ function dirIllum(
   return vec4.fromValues(r, g, b, 255);
 }
 
-function indirIllum(
-  point: vec3,
-  normal: vec3,
-  material: Material,
-  light: LightSource,
-  scene: Scene,
-  depth: number
-): vec4 {
-  if (depth > 1 && Math.random() > BOUNCE_PROBABILITY) {
-    return vec4.fromValues(0, 0, 0, 255); // No indirect illumination
-  }
-
-  const bounceDirection = rejectionSampling(normal);
-  const bounceRay: Ray3D = [point, bounceDirection];
-  const indirectRayColor = pathTracer(bounceRay, light, scene, depth + 1);
-
-  const weight =
-    Math.max(0, vec3.dot(normal, bounceDirection)) / BOUNCE_PROBABILITY;
-  const r = indirectRayColor[0] * material.color[0] * weight;
-  const g = indirectRayColor[1] * material.color[1] * weight;
-  const b = indirectRayColor[2] * material.color[2] * weight;
-
-  return vec4.fromValues(r, g, b, 255);
-}
 
 function pathTracer(
   ray: Ray3D,
@@ -462,42 +416,4 @@ function pathTracer(
   const b = Math.min(255, directLight[2] + indirectLight[2]);
 
   return vec4.fromValues(r, g, b, 255);
-}
-
-function rejectionSampling(normal: vec3): vec3 {
-  const LOCAL_DIRECTION_RS = vec3.create();
-  const TANGENT_RS = vec3.create();
-  const BINORMAL_RS = vec3.create();
-  const UP_VECTOR_RS = vec3.create();
-  const DOT_CHECK_VECTOR_RS = vec3.fromValues(0, 0, 1);
-
-  while (true) {
-    vec3.set(
-      LOCAL_DIRECTION_RS,
-      Math.random() * 2 - 1,
-      Math.random() * 2 - 1,
-      Math.random() * 2
-    );
-    if (
-      vec3.squaredLength(LOCAL_DIRECTION_RS) <= 1 &&
-      vec3.dot(DOT_CHECK_VECTOR_RS, LOCAL_DIRECTION_RS) >= 0
-    ) {
-      break;
-    }
-  }
-  vec3.normalize(LOCAL_DIRECTION_RS, LOCAL_DIRECTION_RS);
-  if (Math.abs(normal[0]) > 0.9) {
-    vec3.set(UP_VECTOR_RS, 0, 1, 0);
-  } else {
-    vec3.set(UP_VECTOR_RS, 1, 0, 0);
-  }
-  vec3.cross(TANGENT_RS, UP_VECTOR_RS, normal);
-  vec3.normalize(TANGENT_RS, TANGENT_RS);
-  vec3.cross(BINORMAL_RS, normal, TANGENT_RS);
-
-  const out = vec3.fromValues(0, 0, 0);
-  vec3.scale(out, TANGENT_RS, LOCAL_DIRECTION_RS[0]);
-  vec3.scaleAndAdd(out, out, BINORMAL_RS, LOCAL_DIRECTION_RS[1]);
-  vec3.scaleAndAdd(out, out, normal, LOCAL_DIRECTION_RS[2]);
-  return out;
 }
