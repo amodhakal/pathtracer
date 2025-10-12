@@ -1,3 +1,4 @@
-import { raycast } from "./raycast";
+import { pathtrace } from "./pathtrace";
+// import { raycast } from "./raycast";
 
-raycast()
+pathtrace();

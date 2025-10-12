@@ -1,8 +1,11 @@
 import vertexCode from "./shaders/shaders.vert";
-import fragmentCode from "./shaders/raycast.frag";
+import fragmentCode from "./shaders/pathtrace.frag";
 import { createProgram, createShader } from "./utils";
 
-export function raycast() {
+const vertices = new Float32Array([-1, 1, -1, -1, 1, 1, -1, -1, 1, -1, 1, 1]);
+const eye = new Float32Array([0.0, 0.0, -0.5]);
+
+export function pathtrace() {
   const canvas = document.getElementById("canvas") as HTMLCanvasElement;
   const gl = canvas.getContext("webgl");
   if (!gl) {
@@ -14,8 +17,6 @@ export function raycast() {
   const fragmentShader = createShader(gl, gl.FRAGMENT_SHADER, fragmentCode);
   const program = createProgram(gl, vertexShader, fragmentShader);
 
-  const vertices = new Float32Array([-1, 1, -1, -1, 1, 1, -1, -1, 1, -1, 1, 1]);
-
   const vertexBuffer = gl.createBuffer();
   gl.bindBuffer(gl.ARRAY_BUFFER, vertexBuffer);
   gl.bufferData(gl.ARRAY_BUFFER, vertices, gl.STATIC_DRAW);
@@ -24,6 +25,8 @@ export function raycast() {
   gl.enableVertexAttribArray(positionAttributeLocation);
   gl.vertexAttribPointer(positionAttributeLocation, 2, gl.FLOAT, false, 0, 0);
 
+  const eyeLocation = gl.getUniformLocation(program, "u_Eye");
+
   canvas.width = canvas.clientWidth;
   canvas.height = canvas.clientHeight;
   gl.viewport(0, 0, gl.canvas.width, gl.canvas.height);
@@ -31,6 +34,8 @@ export function raycast() {
   gl.clearColor(1, 0, 1, 1);
   gl.clear(gl.COLOR_BUFFER_BIT);
   gl.useProgram(program);
+
+  gl.uniform3fv(eyeLocation, eye);
 
   gl.drawArrays(gl.TRIANGLES, 0, 6);
 }
