@@ -66,36 +66,6 @@ Intersect findClosestIntersect(vec3 point, vec3 direction);
 QuadResult solveQuad(vec3 quads);
 float rand(float seed);
 
-void main() {
-    vec3 pixelPosition = vec3(u_Eye.x, u_Eye.y, u_Eye.z + 0.5f);
-    vec3 rayDirection = normalize(pixelPosition - u_Eye);
-    vec3 finalColor = vec3(0.0f, 0.0f, 0.0f);
-    for(int currentSample = 0; currentSample < MAX_SAMPLE_COUNT; currentSample++) {
-        vec3 currentColor = tracePath(u_Eye, rayDirection, 0);
-        finalColor += currentColor;
-    }
-
-    finalColor /= float(MAX_SAMPLE_COUNT);
-    outColor = vec4(finalColor, 1.0f);
-}
-
-vec3 tracePath(vec3 point, vec3 direction, int depth) {
-    Intersect intersect = findClosestIntersect(point, direction);
-    if(!intersect.isExisting) {
-        return vec3(0.0f, 0.0f, 0.0f); // Return black
-    }
-
-    vec3 directLight = calculateDirectIllumination(intersect.intersect, intersect.normal, intersect.color);
-    vec3 indirectLight = calculateIndirectIllumination(intersect.intersect, intersect.normal, intersect.color, depth + 1);
-
-    float red = min(255.0f, directLight[0] + indirectLight[0]);
-    float blue = min(255.0f, directLight[1] + indirectLight[1]);
-    float green = min(255.0f, directLight[2] + indirectLight[2]);
-
-    vec3 finalColor = vec3(red, blue, green);
-    return finalColor;
-}
-
 vec3 calculateDirectIllumination(vec3 point, vec3 normal, vec3 color) {
     vec3 pointToLight = u_Light.position - point;
     vec3 lightDirection = normalize(pointToLight);
@@ -116,20 +86,6 @@ vec3 calculateDirectIllumination(vec3 point, vec3 normal, vec3 color) {
     float green = min(255.0f, 255.0f * u_Light.color[2] * color[2] * weight);
     vec3 finalColor = vec3(red, blue, green);
 
-    return finalColor;
-}
-
-vec3 calculateIndirectIllumination(vec3 point, vec3 normal, vec3 color, int depth) {
-    float rand = rand(float(depth));
-    if(depth > 0 && rand > BOUNCE_SUCCESS_PROBABILITY) {
-        return vec3(0.0f, 0.0f, 0.0f);
-    }
-
-    vec3 bounceDirection = getBounceDirection(normal, rand);
-    vec3 indirectColor = tracePath(point, bounceDirection, depth + 1);
-
-    float weight = max(dot(normal, bounceDirection) / BOUNCE_SUCCESS_PROBABILITY, 0.0f);
-    vec3 finalColor = indirectColor * color * weight;
     return finalColor;
 }
 
@@ -305,4 +261,49 @@ QuadResult solveQuad(vec3 quads) {
 float rand(float seed) {
     vec3 inputs = vec3(v_WindowPixels, u_Time * seed);
     return fract(sin(dot(inputs, vec3(12.9898f, 78.233f, 45.164f))) * 43758.5453123f);
+}
+
+/* TODO Recursion issue */
+void main() {
+    vec3 pixelPosition = vec3(u_Eye.x, u_Eye.y, u_Eye.z + 0.5f);
+    vec3 rayDirection = normalize(pixelPosition - u_Eye);
+    vec3 finalColor = vec3(0.0f, 0.0f, 0.0f);
+    for(int currentSample = 0; currentSample < MAX_SAMPLE_COUNT; currentSample++) {
+        vec3 currentColor = tracePath(u_Eye, rayDirection, 0);
+        finalColor += currentColor;
+    }
+
+    finalColor /= float(MAX_SAMPLE_COUNT);
+    outColor = vec4(finalColor, 1.0f);
+}
+
+vec3 tracePath(vec3 point, vec3 direction, int depth) {
+    Intersect intersect = findClosestIntersect(point, direction);
+    if(!intersect.isExisting) {
+        return vec3(0.0f, 0.0f, 0.0f); // Return black
+    }
+
+    vec3 directLight = calculateDirectIllumination(intersect.intersect, intersect.normal, intersect.color);
+    vec3 indirectLight = calculateIndirectIllumination(intersect.intersect, intersect.normal, intersect.color, depth);
+
+    float red = min(255.0f, directLight[0] + indirectLight[0]);
+    float blue = min(255.0f, directLight[1] + indirectLight[1]);
+    float green = min(255.0f, directLight[2] + indirectLight[2]);
+
+    vec3 finalColor = vec3(red, blue, green);
+    return finalColor;
+}
+
+vec3 calculateIndirectIllumination(vec3 point, vec3 normal, vec3 color, int depth) {
+    float rand = rand(float(depth));
+    if(depth > 0 && rand > BOUNCE_SUCCESS_PROBABILITY) {
+        return vec3(0.0f, 0.0f, 0.0f);
+    }
+
+    vec3 bounceDirection = getBounceDirection(normal, rand);
+    vec3 indirectColor = tracePath(point, bounceDirection, depth + 1);
+
+    float weight = max(dot(normal, bounceDirection) / BOUNCE_SUCCESS_PROBABILITY, 0.0f);
+    vec3 finalColor = indirectColor * color * weight;
+    return finalColor;
 }
