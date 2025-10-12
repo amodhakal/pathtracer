@@ -78,13 +78,43 @@ void main() {
 }
 
 vec3 tracePath(vec3 point, vec3 direction, int depth) {
-    // TODO: Implement path tracing logic
-    return vec3(0.0, 0.0, 0.0);
+    Intersect intersect = findClosestIntersect(point, direction);
+    if(!intersect.isExisting) {
+        return vec3(0.0, 0.0, 0.0); // Return black
+    }
+
+    vec3 directLight = calculateDirectIllumination(intersect.intersect, intersect.normal, intersect.color);
+    vec3 indirectLight = calculateIndirectIllumination(intersect.intersect, intersect.normal, intersect.color, depth + 1);
+
+    float red = min(255.0, directLight[0] + indirectLight[0]);
+    float blue = min(255.0, directLight[1] + indirectLight[1]);
+    float green = min(255.0, directLight[2] + indirectLight[2]);
+    
+    vec3 finalColor = vec3(red, blue, green);
+    return finalColor;
 }
 
 vec3 calculateDirectIllumination(vec3 point, vec3 normal, vec3 color) {
-    // TODO Implement
-    return vec3(0.0, 0.0, 0.0);
+    vec3 pointToLight = u_Light.position - point;
+    vec3 lightDirection = normalize(pointToLight);
+    float lightDistance = length(pointToLight);
+
+    Intersect intersect = findClosestIntersect(point, lightDirection);
+    if(intersect.isExisting && intersect.distance < lightDistance) {
+        // Shadow
+        return vec3(0.0, 0.0, 0.0);
+    }
+
+    float numerator = max(dot(normal, lightDirection), 0.0);
+    float denominator = 1.0 + lightDistance * lightDistance;
+    float weight = numerator / denominator;
+
+    float red = min(255.0, 255.0 * u_Light.color[0] * color[0] * weight);
+    float blue = min(255.0, 255.0 * u_Light.color[1] * color[1] * weight);
+    float green = min(255.0, 255.0 * u_Light.color[2] * color[2] * weight);
+    vec3 finalColor = vec3(red, blue, green);
+
+    return finalColor;
 }
 
 vec3 calculateIndirectIllumination(vec3 point, vec3 normal, vec3 color, int depth) {
