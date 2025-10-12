@@ -1,12 +1,16 @@
 precision mediump float;
 
 /* Compile time values */
+#define MAX_TERM_COUNT 2
+#define MAX_TERM_COUNT 2
+#define MAX_BOUNCES 100
 #define MAX_SAMPLE_COUNT 10 
-#define MAX_ELLIPSOID_COUNT 10
-#define MAX_TRIANGLE_COUNT 12
+#define ELLIPSOID_COUNT 10
+#define ELLIPSOID_VECTORS 3
+#define TRIANGLE_COUNT 12
+#define TRIANGLE_VECTORS 5
 #define BOUNCE_SUCCESS_PROBABILITY 0.5
 #define CLIP_VAL 0.001
-#define MAX_TERM_COUNT 2
 
 struct Light {
     vec3 position;
@@ -34,9 +38,10 @@ struct Triangle {
 
 struct Intersect {
     bool isExisting;
-    vec3 color;
-    vec3 intersect;
     float distance;
+    vec3 intersect;
+    vec3 color;
+    vec3 normal;
 };
 
 /* Received from the vertex */ 
@@ -45,7 +50,8 @@ varying vec2 v_WindowPixels;
 /* Received from the code */
 uniform vec3 u_Eye;
 uniform Light u_Light;
-uniform vec3 u_Ellipsoids[MAX_ELLIPSOID_COUNT * 3];
+uniform vec3 u_Ellipsoids[ELLIPSOID_COUNT * ELLIPSOID_VECTORS];
+uniform vec3 u_Triangles[TRIANGLE_COUNT * TRIANGLE_VECTORS];
 uniform float u_Time;
 
 vec3 tracePath(vec3 point, vec3 direction, int depth);
@@ -54,6 +60,7 @@ vec3 calculateIndirectIllumination(vec3 point, vec3 normal, vec3 color, int dept
 vec3 getBounceDirection(vec3 normal, float seed);
 Intersect calculateRayEllipsoidIntersect(vec3 point, vec3 direction, Ellipsoid ellipsoid);
 Intersect calculateRayTriangleIntersect(vec3 point, vec3 direction, Triangle triangle);
+Intersect findClosestIntersect(vec3 point, vec3 direction);
 QuadResult solveQuad(vec3 quads);
 float rand(float seed);
 
@@ -96,10 +103,11 @@ vec3 calculateIndirectIllumination(vec3 point, vec3 normal, vec3 color, int dept
 
 vec3 getBounceDirection(vec3 normal, float seed) {
     vec3 direction;
+    bool isValidValue = false;
     bool isSquareLengthLessThanUnit;
     bool isValidVectorDirection;
 
-    do {
+    for(int idx = 0; idx < MAX_BOUNCES; idx++) {
         float firstRand = rand(seed);
         float secondRand = rand(firstRand);
         float thirdRand = rand(secondRand);
@@ -107,7 +115,15 @@ vec3 getBounceDirection(vec3 normal, float seed) {
 
         isSquareLengthLessThanUnit = pow(length(direction), 2.0) <= 1.0;
         isValidVectorDirection = dot(vec3(0.0, 0.0, 0.1), direction) >= 0.0;
-    } while(!isSquareLengthLessThanUnit || !isValidVectorDirection);
+
+        if(isSquareLengthLessThanUnit && isValidVectorDirection) {
+            isValidValue = true;
+        }
+    }
+
+    if(!isValidValue) {
+        return vec3(0.0, 0.0, 0.0);
+    }
 
     direction = normalize(direction);
     vec3 up = abs(normal[0]) > 0.9 ? vec3(0.0, 1.0, 0.0) : vec3(1.0, 0.0, 0.0);
@@ -133,21 +149,25 @@ Intersect calculateRayEllipsoidIntersect(vec3 point, vec3 direction, Ellipsoid e
     vec3 quads = vec3(quadA, quadB, quadC);
     QuadResult result = solveQuad(quads);
 
-    for(int idx = 0; idx < result.termCount; idx++) {
+    for(int idx = 0; idx < MAX_TERM_COUNT; idx++) {
+        if(idx >= result.termCount) {
+            break;
+        }
+
         float term = result.terms[idx];
         if(term < CLIP_VAL) {
             continue;
         }
 
         vec3 intersect = point + direction * term;
-        return Intersect(true, ellipsoid.color, intersect, term);
+        return Intersect(true, term, ellipsoid.color, intersect, vec3(0.0, 0.0, 0.0));
     }
 
-    return Intersect(false, vec3(0.0, 0.0, 0.0), vec3(0.0, 0.0, 0.0), 0.0);
+    return Intersect(false, 0.0, vec3(0.0, 0.0, 0.0), vec3(0.0, 0.0, 0.0), vec3(0.0, 0.0, 0.0));
 }
 
 Intersect calculateRayTriangleIntersect(vec3 point, vec3 direction, Triangle triangle) {
-    Intersect noIntersection = Intersect(false, vec3(0.0, 0.0, 0.0), vec3(0.0, 0.0, 0.0), 0.0);
+    Intersect noIntersection = Intersect(false, 0.0, vec3(0.0, 0.0, 0.0), vec3(0.0, 0.0, 0.0), vec3(0.0, 0.0, 0.0));
 
     vec3 triangleEdge1 = triangle.vertex2 - triangle.vertex1;
     vec3 triangleEdge2 = triangle.vertex3 - triangle.vertex1;
@@ -177,7 +197,54 @@ Intersect calculateRayTriangleIntersect(vec3 point, vec3 direction, Triangle tri
     }
 
     vec3 intersect = point + direction * term;
-    return Intersect(true, triangle.color, intersect, term);
+    return Intersect(true, term, triangle.color, intersect, vec3(0.0, 0.0, 0.0));
+}
+
+Intersect findClosestIntersect(vec3 point, vec3 direction) {
+    Intersect closestIntersect = Intersect(false, 0.0, vec3(0.0, 0.0, 0.0), vec3(0.0, 0.0, 0.0), vec3(0.0, 0.0, 0.0));
+    float closestDistance = 1e20;
+
+    for(int idx = 0; idx < TRIANGLE_COUNT; idx++) {
+        int baseIdx = idx * TRIANGLE_VECTORS;
+        vec3 vertex1 = u_Triangles[baseIdx];
+        vec3 vertex2 = u_Triangles[baseIdx + 1];
+        vec3 vertex3 = u_Triangles[baseIdx + 2];
+        vec3 normal = u_Triangles[baseIdx + 3];
+        vec3 color = u_Triangles[baseIdx + 4];
+
+        Triangle triangle = Triangle(vertex1, vertex2, vertex3, normal, color);
+        Intersect intersect = calculateRayTriangleIntersect(point, direction, triangle);
+        if(!intersect.isExisting || intersect.distance > closestDistance) {
+            continue;
+        }
+
+        closestDistance = intersect.distance;
+        closestIntersect = intersect;
+        closestIntersect.normal = normal;
+    }
+
+    for(int idx = 0; idx < ELLIPSOID_COUNT; idx++) {
+        int baseIdx = idx * ELLIPSOID_VECTORS;
+        vec3 center = u_Ellipsoids[baseIdx];
+        vec3 radius = u_Ellipsoids[baseIdx + 1];
+        vec3 color = u_Ellipsoids[baseIdx + 2];
+
+        Ellipsoid ellipsoid = Ellipsoid(center, radius, color);
+        Intersect intersect = calculateRayEllipsoidIntersect(point, direction, ellipsoid);
+        if(!intersect.isExisting || intersect.distance > closestDistance) {
+            continue;
+        }
+
+        vec3 normal = point - center;
+        normal /= radius * radius;
+        normal = normalize(normal);
+
+        closestDistance = intersect.distance;
+        closestIntersect = intersect;
+        closestIntersect.normal = normal;
+    }
+
+    return closestIntersect;
 }
 
 QuadResult solveQuad(vec3 quads) {
