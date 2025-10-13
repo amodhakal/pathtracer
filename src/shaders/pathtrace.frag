@@ -5,13 +5,13 @@ precision highp float;
 /* Compile time values */
 #define MAX_TERM_COUNT 2
 #define MAX_BOUNCES 100
-#define MAX_SAMPLE_COUNT 20 // Increased for a cleaner final image
+#define MAX_SAMPLE_COUNT 1000 // Increased for a cleaner final image
 #define ELLIPSOID_COUNT 2
 #define ELLIPSOID_VECTORS 3
 #define TRIANGLE_COUNT 10
 #define TRIANGLE_VECTORS 5
-#define BOUNCE_SUCCESS_PROBABILITY 0.5
-#define CLIP_VAL 0.001
+#define BOUNCE_SUCCESS_PROBABILITY 0.7
+#define CLIP_VAL 0.00001
 
 struct Light {
     vec3 position;
@@ -45,7 +45,7 @@ struct Intersect {
     vec3 normal;
 };
 
-/* Received from the vertex */ 
+/* Received from the vertex */
 in vec2 v_WindowPixels;
 out vec4 outColor;
 
@@ -64,7 +64,57 @@ Intersect calculateRayEllipsoidIntersect(vec3 point, vec3 direction, Ellipsoid e
 Intersect calculateRayTriangleIntersect(vec3 point, vec3 direction, Triangle triangle);
 Intersect findClosestIntersect(vec3 point, vec3 direction);
 QuadResult solveQuad(vec3 quads);
-float rand(float seed);
+float rand();
+
+uvec4 seed;
+ivec2 pixel;
+
+uint hash(uint x) {
+    // Explicitly cast the hexadecimal literal to a uint before multiplying
+    x = ((x >> 16u) ^ x) * uint(0x45d9f3b);
+    x = ((x >> 16u) ^ x) * uint(0x45d9f3b);
+    x = (x >> 16u) ^ x;
+    return x;
+}
+
+// --- CORRECTED SEED INITIALIZATION ---
+// Replace your old InitRNG function with this one.
+void InitRNG(vec2 p, int frame)
+{
+    // Use integer pixel coordinates for seeding
+    ivec2 pixel = ivec2(p);
+
+    // Create a unique integer for this pixel and frame combination
+    uint uniqueID1 = uint(pixel.x) + uint(pixel.y) * uint(u_Resolution.x);
+    uint uniqueID2 = uint(frame);
+
+    // Hash the IDs to create chaotic, decorrelated seeds.
+    // This is the key step to removing the patterned artifacts.
+    uint seed1 = hash(uniqueID1 + uniqueID2);
+    uint seed2 = hash(seed1);
+    uint seed3 = hash(seed2);
+    uint seed4 = hash(seed3);
+
+    seed = uvec4(seed1, seed2, seed3, seed4);
+}
+
+void pcg4d(inout uvec4 v) {
+    v = v * 1664525u + 1013904223u;
+    v.x += v.y * v.w;
+    v.y += v.z * v.x;
+    v.z += v.x * v.y;
+    v.w += v.y * v.z;
+    v = v ^ (v >> 16u);
+    v.x += v.y * v.w;
+    v.y += v.z * v.x;
+    v.z += v.x * v.y;
+    v.w += v.y * v.z;
+}
+
+float rand() {
+    pcg4d(seed);
+    return float(seed.x) / float(0xffffffffu);
+}
 
 // --- CORRECTED FUNCTION #1 ---
 vec3 calculateDirectIllumination(vec3 point, vec3 normal, vec3 color) {
@@ -96,9 +146,9 @@ vec3 getBounceDirection(vec3 normal, float seed) {
 
     for(int idx = 0; idx < MAX_BOUNCES; idx++) {
         float s = seed + float(idx) * 0.01f;
-        float firstRand = rand(s);
-        float secondRand = rand(firstRand);
-        float thirdRand = rand(secondRand);
+        float firstRand = rand();
+        float secondRand = rand();
+        float thirdRand = rand();
         direction = vec3(2.0f * firstRand - 1.0f, 2.0f * secondRand - 1.0f, 2.0f * thirdRand - 1.0f);
 
         if(dot(direction, direction) <= 1.0f) {
@@ -240,25 +290,25 @@ QuadResult solveQuad(vec3 quads) {
     }
 }
 
-float rand(float seed) {
-    vec2 p = v_WindowPixels.xy + seed + u_Time;
-    return fract(sin(dot(p, vec2(12.9898f, 78.233f))) * 43758.5453f);
-    
-}
-
 void main() {
     vec2 pos = v_WindowPixels.xy;
     pos.x *= u_Resolution.x / u_Resolution.y;
 
+    // No InitRNG here anymore
+
     vec3 rayOrigin = u_Eye;
     vec2 world_xy = (pos.xy + 1.0f) * 0.5f;
-    vec3 targetPoint = vec3(world_xy, 0.0f);
+    vec3 targetPoint = vec3(world_xy, u_Eye.z + 0.5);
     vec3 rayDirection = normalize(targetPoint - rayOrigin);
 
     vec3 finalColor = vec3(0.0f);
 
     for(int i = 0; i < MAX_SAMPLE_COUNT; i++) {
-        float sampleId = float(i) * 0.1337f; // Use a more unique seed
+        // --- FIX: Initialize the RNG inside the loop for each sample ---
+        // We add 'i' to the frame to ensure each sample path gets a unique seed.
+        InitRNG(v_WindowPixels, int(u_Time) + i);
+
+        float sampleId = float(i) * 0.1337f;
         finalColor += tracePath(rayOrigin, rayDirection, sampleId);
     }
 
@@ -301,10 +351,10 @@ vec3 tracePath(vec3 startPoint, vec3 startDirection, float sampleId) {
         // --- Step 2: Russian Roulette Path Termination ---
         // To avoid infinite bouncing and to improve performance, we probabilistically
         // terminate the path. After the first bounce, there's a chance the path ends.
-        float r = min(rand(float(bounce) + sampleId), 0.0);
-        // if(bounce > 0 && r > BOUNCE_SUCCESS_PROBABILITY) {
-        //     break;
-        // }
+        float r = rand();
+        if(bounce > 0 && r > BOUNCE_SUCCESS_PROBABILITY) {
+            break;
+        }
 
         // --- Step 3: Prepare for the Next Bounce (Indirect Illumination) ---
         // Determine the direction for the next bounced ray.

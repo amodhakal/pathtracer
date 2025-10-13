@@ -24,7 +24,7 @@ const triangles = [
     vertex1: new Float32Array([0.0, 0.0, 0.0]),
     vertex2: new Float32Array([0.0, 1.0, 0.0]),
     vertex3: new Float32Array([0.0, 0.0, 1.0]),
-    normal: new Float32Array([1.0, 0.0, 0.0]),  // Points inward
+    normal: new Float32Array([1.0, 0.0, 0.0]), // Points inward
     color: new Float32Array([0.8, 0.0, 0.0]),
   },
   {
@@ -40,7 +40,7 @@ const triangles = [
     vertex1: new Float32Array([1.0, 0.0, 0.0]),
     vertex2: new Float32Array([1.0, 1.0, 0.0]),
     vertex3: new Float32Array([1.0, 0.0, 1.0]),
-    normal: new Float32Array([-1.0, 0.0, 0.0]),  // Points inward
+    normal: new Float32Array([-1.0, 0.0, 0.0]), // Points inward
     color: new Float32Array([0.0, 0.0, 0.8]),
   },
   {
@@ -56,7 +56,7 @@ const triangles = [
     vertex1: new Float32Array([0.0, 0.0, 1.0]),
     vertex2: new Float32Array([1.0, 0.0, 1.0]),
     vertex3: new Float32Array([0.0, 1.0, 1.0]),
-    normal: new Float32Array([0.0, 0.0, -1.0]),  // Points inward
+    normal: new Float32Array([0.0, 0.0, -1.0]), // Points inward
     color: new Float32Array([1.0, 1.0, 1.0]),
   },
   {
@@ -72,7 +72,7 @@ const triangles = [
     vertex1: new Float32Array([0.0, 1.0, 0.0]),
     vertex2: new Float32Array([0.0, 1.0, 1.0]),
     vertex3: new Float32Array([1.0, 1.0, 0.0]),
-    normal: new Float32Array([0.0, -1.0, 0.0]),  // Points inward
+    normal: new Float32Array([0.0, -1.0, 0.0]), // Points inward
     color: new Float32Array([0.8, 0.8, 0.8]),
   },
   {
@@ -88,7 +88,7 @@ const triangles = [
     vertex1: new Float32Array([0.0, 0.0, 0.0]),
     vertex2: new Float32Array([1.0, 0.0, 0.0]),
     vertex3: new Float32Array([0.0, 0.0, 1.0]),
-    normal: new Float32Array([0.0, 1.0, 0.0]),  // Points inward
+    normal: new Float32Array([0.0, 1.0, 0.0]), // Points inward
     color: new Float32Array([0.8, 0.8, 0.8]),
   },
   {
@@ -99,21 +99,20 @@ const triangles = [
     color: new Float32Array([0.8, 0.8, 0.8]),
   },
 
-
   // front face (z=1, white)
   {
-    vertex1: new Float32Array([0.0, 0.0, -1.0]),
-    vertex2: new Float32Array([1.0, 0.0, -1.0]),
-    vertex3: new Float32Array([0.0, 1.0, -1.0]),
-    normal: new Float32Array([0.0, 0.0, 1.0]),  // Points inward
-    color: new Float32Array([1.0, 1.0, 1.0]),
+    vertex1: new Float32Array([0.0, 0.0, 0.0]),
+    vertex2: new Float32Array([1.0, 0.0, 0.0]),
+    vertex3: new Float32Array([0.0, 1.0, 0.0]),
+    normal: new Float32Array([0.0, 0.0, 1.0]), // Points inward
+    color: new Float32Array([0.0, 1.0, 0.0]),
   },
   {
-    vertex1: new Float32Array([1.0, 0.0,- 1.0]),
-    vertex2: new Float32Array([1.0, 1.0, -1.0]),
-    vertex3: new Float32Array([0.0, 1.0, -1.0]),
+    vertex1: new Float32Array([1.0, 0.0, 0.0]),
+    vertex2: new Float32Array([1.0, 1.0, 0.0]),
+    vertex3: new Float32Array([0.0, 1.0, 0.0]),
     normal: new Float32Array([0.0, 0.0, 1.0]),
-    color: new Float32Array([1.0, 1.0, 1.0]),
+    color: new Float32Array([0.0, 1.0, 0.0]),
   },
 ];
 
