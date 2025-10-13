@@ -2,15 +2,14 @@
 
 precision highp float;
 
-/* Compile time values */
 #define MAX_TERM_COUNT 2
-#define MAX_BOUNCES 100
-#define MAX_SAMPLE_COUNT 1000 // Increased for a cleaner final image
+#define MAX_BOUNCES 20
+#define MAX_SAMPLE_COUNT 800
 #define ELLIPSOID_COUNT 2
 #define ELLIPSOID_VECTORS 3
-#define TRIANGLE_COUNT 10
+#define TRIANGLE_COUNT 12
 #define TRIANGLE_VECTORS 5
-#define BOUNCE_SUCCESS_PROBABILITY 0.7
+#define BOUNCE_SUCCESS_PROBABILITY 0.8
 #define CLIP_VAL 0.00001
 
 struct Light {
@@ -45,11 +44,9 @@ struct Intersect {
     vec3 normal;
 };
 
-/* Received from the vertex */
 in vec2 v_WindowPixels;
 out vec4 outColor;
 
-/* Received from the code */
 uniform vec3 u_Eye;
 uniform Light u_Light;
 uniform vec3 u_Ellipsoids[ELLIPSOID_COUNT * ELLIPSOID_VECTORS];
@@ -67,34 +64,25 @@ QuadResult solveQuad(vec3 quads);
 float rand();
 
 uvec4 seed;
-ivec2 pixel;
 
 uint hash(uint x) {
-    // Explicitly cast the hexadecimal literal to a uint before multiplying
     x = ((x >> 16u) ^ x) * uint(0x45d9f3b);
     x = ((x >> 16u) ^ x) * uint(0x45d9f3b);
     x = (x >> 16u) ^ x;
     return x;
 }
 
-// --- CORRECTED SEED INITIALIZATION ---
-// Replace your old InitRNG function with this one.
-void InitRNG(vec2 p, int frame)
-{
-    // Use integer pixel coordinates for seeding
+void InitRNG(vec2 p, int frame) {
+
     ivec2 pixel = ivec2(p);
 
-    // Create a unique integer for this pixel and frame combination
     uint uniqueID1 = uint(pixel.x) + uint(pixel.y) * uint(u_Resolution.x);
     uint uniqueID2 = uint(frame);
 
-    // Hash the IDs to create chaotic, decorrelated seeds.
-    // This is the key step to removing the patterned artifacts.
     uint seed1 = hash(uniqueID1 + uniqueID2);
     uint seed2 = hash(seed1);
     uint seed3 = hash(seed2);
     uint seed4 = hash(seed3);
-
     seed = uvec4(seed1, seed2, seed3, seed4);
 }
 
@@ -116,18 +104,14 @@ float rand() {
     return float(seed.x) / float(0xffffffffu);
 }
 
-// --- CORRECTED FUNCTION #1 ---
 vec3 calculateDirectIllumination(vec3 point, vec3 normal, vec3 color) {
     vec3 pointToLight = u_Light.position - point;
     vec3 lightDirection = normalize(pointToLight);
     float lightDistance = length(pointToLight);
 
-    // Nudge the shadow ray's origin to prevent self-shadowing
     vec3 shadowRayOrigin = point + normal * CLIP_VAL;
     Intersect intersect = findClosestIntersect(shadowRayOrigin, lightDirection);
-
     if(intersect.isExisting && intersect.distance < lightDistance) {
-        // Shadow
         return vec3(0.0f, 0.0f, 0.0f);
     }
 
@@ -136,7 +120,6 @@ vec3 calculateDirectIllumination(vec3 point, vec3 normal, vec3 color) {
     float weight = numerator / denominator;
 
     vec3 finalColor = u_Light.color * color * weight;
-
     return finalColor;
 }
 
@@ -150,7 +133,6 @@ vec3 getBounceDirection(vec3 normal, float seed) {
         float secondRand = rand();
         float thirdRand = rand();
         direction = vec3(2.0f * firstRand - 1.0f, 2.0f * secondRand - 1.0f, 2.0f * thirdRand - 1.0f);
-
         if(dot(direction, direction) <= 1.0f) {
             isValidValue = true;
             break;
@@ -158,17 +140,17 @@ vec3 getBounceDirection(vec3 normal, float seed) {
     }
 
     if(!isValidValue) {
-        return normal; // Fallback
+        return normal;
     }
 
     direction = normalize(direction);
     if(dot(direction, normal) < 0.0f) {
         direction = -direction;
     }
+
     return direction;
 }
 
-// --- REFACTORED FUNCTION (from previous step) ---
 Intersect calculateRayEllipsoidIntersect(vec3 point, vec3 direction, Ellipsoid ellipsoid) {
     vec3 firstResult = direction / ellipsoid.radius;
     vec3 secondResult = point - ellipsoid.center;
@@ -195,17 +177,14 @@ Intersect calculateRayEllipsoidIntersect(vec3 point, vec3 direction, Ellipsoid e
         vec3 normal = intersect - ellipsoid.center;
         normal /= ellipsoid.radius * ellipsoid.radius;
         normal = normalize(normal);
-
         return Intersect(true, term, intersect, ellipsoid.color, normal);
     }
 
     return Intersect(false, 0.0f, vec3(0.0f, 0.0f, 0.0f), vec3(0.0f, 0.0f, 0.0f), vec3(0.0f, 0.0f, 0.0f));
 }
 
-// --- CORRECTED FUNCTION #2 ---
 Intersect calculateRayTriangleIntersect(vec3 point, vec3 direction, Triangle triangle) {
     Intersect noIntersection = Intersect(false, 0.0f, vec3(0.0f, 0.0f, 0.0f), vec3(0.0f, 0.0f, 0.0f), vec3(0.0f, 0.0f, 0.0f));
-
     vec3 triangleEdge1 = triangle.vertex2 - triangle.vertex1;
     vec3 triangleEdge2 = triangle.vertex3 - triangle.vertex1;
 
@@ -225,7 +204,6 @@ Intersect calculateRayTriangleIntersect(vec3 point, vec3 direction, Triangle tri
     vec3 crossVector = cross(pointToVertex, triangleEdge1);
     float vValue = dot(direction, crossVector) * inverseDeterminant;
 
-    // THE CORRECTED BARYCENTRIC CHECK
     if(vValue < 0.0f || uValue + vValue > 1.0f) {
         return noIntersection;
     }
@@ -239,7 +217,6 @@ Intersect calculateRayTriangleIntersect(vec3 point, vec3 direction, Triangle tri
     return Intersect(true, term, intersect, triangle.color, triangle.normal);
 }
 
-// --- REFACTORED FUNCTION (from previous step) ---
 Intersect findClosestIntersect(vec3 point, vec3 direction) {
     Intersect closestIntersect = Intersect(false, 0.0f, vec3(0.0f, 0.0f, 0.0f), vec3(0.0f, 0.0f, 0.0f), vec3(0.0f, 0.0f, 0.0f));
     float closestDistance = 1e20f;
@@ -294,94 +271,51 @@ void main() {
     vec2 pos = v_WindowPixels.xy;
     pos.x *= u_Resolution.x / u_Resolution.y;
 
-    // No InitRNG here anymore
-
     vec3 rayOrigin = u_Eye;
     vec2 world_xy = (pos.xy + 1.0f) * 0.5f;
-    vec3 targetPoint = vec3(world_xy, u_Eye.z + 0.5);
+    vec3 targetPoint = vec3(world_xy, u_Eye.z + 0.5f);
     vec3 rayDirection = normalize(targetPoint - rayOrigin);
-
     vec3 finalColor = vec3(0.0f);
 
     for(int i = 0; i < MAX_SAMPLE_COUNT; i++) {
-        // --- FIX: Initialize the RNG inside the loop for each sample ---
-        // We add 'i' to the frame to ensure each sample path gets a unique seed.
         InitRNG(v_WindowPixels, int(u_Time) + i);
-
         float sampleId = float(i) * 0.1337f;
         finalColor += tracePath(rayOrigin, rayDirection, sampleId);
     }
 
     finalColor /= float(MAX_SAMPLE_COUNT);
     finalColor = pow(finalColor, vec3(1.0f / 2.2f));
-
     outColor = vec4(finalColor, 1.0f);
 }
 
 vec3 tracePath(vec3 startPoint, vec3 startDirection, float sampleId) {
-  // The starting point of the current ray segment.
     vec3 point = startPoint;
-    // The direction of the current ray segment.
     vec3 direction = startDirection;
-
-    // finalColor accumulates the light seen along the path.
     vec3 finalColor = vec3(0.0f);
-    // throughput tracks the color attenuation of the path. It starts at white (no attenuation).
-    // As the ray bounces off colored surfaces, this value is multiplied by their color.
     vec3 throughput = vec3(1.0f);
 
     for(int bounce = 0; bounce < MAX_BOUNCES; bounce++) {
-        // Find the closest object the ray intersects with.
         Intersect intersect = findClosestIntersect(point, direction);
-
-        // If the ray hits nothing, it has escaped the scene. Stop tracing this path.
         if(!intersect.isExisting) {
-            // In a more advanced tracer, you might add a background/sky color here,
-            // multiplied by the current throughput.
+
             break;
         }
 
-        // --- Step 1: Accumulate Direct Illumination ---
-        // Calculate the light that comes directly from the light source and hits this
-        // intersection point. This contribution is scaled by the `throughput` because
-        // the ray had to travel through a path of colored surfaces to get here.
-        vec3 directLight = calculateDirectIllumination(intersect.intersect, intersect.normal, intersect.color);
-        finalColor += directLight * throughput;
-
-        // --- Step 2: Russian Roulette Path Termination ---
-        // To avoid infinite bouncing and to improve performance, we probabilistically
-        // terminate the path. After the first bounce, there's a chance the path ends.
+        finalColor += calculateDirectIllumination(intersect.intersect, intersect.normal, intersect.color) * throughput;
+        throughput *= intersect.color;
         float r = rand();
         if(bounce > 0 && r > BOUNCE_SUCCESS_PROBABILITY) {
             break;
         }
 
-        // --- Step 3: Prepare for the Next Bounce (Indirect Illumination) ---
-        // Determine the direction for the next bounced ray.
-        vec3 bounceDirection = getBounceDirection(intersect.normal, r);
-
-        // The probability of continuing the path. If we survived Russian Roulette,
-        // we must divide by the success probability to keep the result unbiased.
         float probability = (bounce > 0) ? BOUNCE_SUCCESS_PROBABILITY : 1.0f;
-
-        // Calculate the Monte Carlo weight for this bounce, which includes the cosine term.
-        // This accounts for the energy falloff at grazing angles (Lambert's cosine law).
-        float weight = dot(intersect.normal, bounceDirection) / probability;
-
-        // Update the throughput for the *next* segment of the path. Any light gathered
-        // from future bounces will now be filtered by the color of the surface we just hit.
-        throughput *= intersect.color * weight;
-
-        // If throughput becomes black, no more light can be gathered. Stop.
-        if(throughput.x < 0.001f && throughput.y < 0.001f && throughput.z < 0.001f) {
+        throughput /= probability;
+        if(max(throughput.r, max(throughput.g, throughput.b)) < 0.001f) {
             break;
         }
 
-        // --- Step 4: Move the Ray to its New Position ---
-        // The new ray starts at the intersection point, nudged slightly along the
-        // normal to prevent immediate self-intersection on the next bounce.
         point = intersect.intersect + intersect.normal * CLIP_VAL;
-        direction = bounceDirection;
+        direction = getBounceDirection(intersect.normal, r);
     }
 
     return finalColor;
