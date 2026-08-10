@@ -2,7 +2,7 @@
 precision highp float;
 
 #define MAX_TERM_COUNT 2
-#define MAX_BOUNCES 100
+#define MAX_BOUNCES 50
 #define ELLIPSOID_COUNT 5
 #define ELLIPSOID_VECTORS 3
 #define TRIANGLE_COUNT 14

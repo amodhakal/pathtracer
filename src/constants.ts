@@ -116,6 +116,11 @@ const ellipsoids = [
     radius: new Float32Array([0.1, 0.1, 0.1]),
     color: new Float32Array([0.9, 0.9, 0.9]),
   },
+  {
+    position: new Float32Array([0.7, 0.4, 0.0]),
+    radius: new Float32Array([0.15, 0.15, 0.15]),
+    color: new Float32Array([1.0, 0.2, 0.2]),
+  },
 ];
 
 const ELLIPSOID_VEC_VALUE_COUNT = 9;
@@ -129,7 +134,7 @@ export const light = {
   position: new Float32Array([0.5, 0.96, 0.0]),
   color: new Float32Array([1.0, 1.0, 1.0]),
   normal: new Float32Array([0.0, -1.0, 0.0]),
-  size: new Float32Array([0.25, 0.25]),
+  size: new Float32Array([0.1, 0.15]),
 };
 
 triangles.forEach((triangle, i) => {
