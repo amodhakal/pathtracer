@@ -1,6 +1,7 @@
 import vertexCode from "./shaders/shaders.vert";
 import pathtraceFragCode from "./shaders/pathtrace.frag";
 import displayFragCode from "./shaders/display.frag";
+import noiseGenFragCode from "./shaders/noiseGen.frag";
 import { createProgram, createShader } from "./utils";
 import { vertices, time, flattenedTriangles, flattenedEllipsoids } from "./constants";
 
@@ -19,38 +20,14 @@ if (!floatExt) {
 
 try {
   const vertexShader = createShader(gl, gl.VERTEX_SHADER, vertexCode);
-  
+
   const pathtraceShader = createShader(gl, gl.FRAGMENT_SHADER, pathtraceFragCode);
   const pathtraceProgram = createProgram(gl, vertexShader, pathtraceShader);
 
   const displayShader = createShader(gl, gl.FRAGMENT_SHADER, displayFragCode);
   const displayProgram = createProgram(gl, vertexShader, displayShader);
 
-  const noiseGenShader = createShader(gl, gl.FRAGMENT_SHADER, `#version 300 es
-precision highp float;
-
-in vec2 v_WindowPixels;
-out vec4 outColor;
-
-uniform float u_Seed;
-uniform vec2 u_Resolution;
-
-uint hash(uint x) {
-    x = ((x >> 16u) ^ x) * uint(0x45d9f3b);
-    x = ((x >> 16u) ^ x) * uint(0x45d9f3b);
-    x = (x >> 16u) ^ x;
-    return x;
-}
-
-void main() {
-    uvec2 pixel = uvec2(gl_FragCoord.xy);
-    uint seedInt = uint(u_Seed);
-    
-    uint h = hash(pixel.x + hash(pixel.y + seedInt));
-    float n = float(h) / 4294967295.0;
-    
-    outColor = vec4(vec3(n), 1.0);
-}`);
+  const noiseGenShader = createShader(gl, gl.FRAGMENT_SHADER, noiseGenFragCode);
   const noiseProgram = createProgram(gl, vertexShader, noiseGenShader);
 
   const vertexBuffer = gl.createBuffer();
@@ -132,7 +109,7 @@ void main() {
     u_Eye: gl.getUniformLocation(pathtraceProgram, "u_Eye")!,
     u_Light: {
       position: gl.getUniformLocation(pathtraceProgram, "u_Light.position")!,
-      color: gl.getUniformLocation(pathtraceProgram, "u_Light.color")!
+      color: gl.getUniformLocation(pathtraceProgram, "u_Light.color")!,
     },
     u_Ellipsoids: gl.getUniformLocation(pathtraceProgram, "u_Ellipsoids")!,
     u_Triangles: gl.getUniformLocation(pathtraceProgram, "u_Triangles")!,
@@ -140,16 +117,16 @@ void main() {
     u_Resolution: gl.getUniformLocation(pathtraceProgram, "u_Resolution")!,
     u_FrameCount: gl.getUniformLocation(pathtraceProgram, "u_FrameCount")!,
     u_NoiseTexture: gl.getUniformLocation(pathtraceProgram, "u_NoiseTexture")!,
-    u_AccumTexture: gl.getUniformLocation(pathtraceProgram, "u_AccumTexture")!
+    u_AccumTexture: gl.getUniformLocation(pathtraceProgram, "u_AccumTexture")!,
   };
 
   const noiseUniforms = {
     u_Seed: gl.getUniformLocation(noiseProgram, "u_Seed")!,
-    u_Resolution: gl.getUniformLocation(noiseProgram, "u_Resolution")!
+    u_Resolution: gl.getUniformLocation(noiseProgram, "u_Resolution")!,
   };
 
   const displayUniforms = {
-    u_NoiseTexture: gl.getUniformLocation(displayProgram, "u_NoiseTexture")!
+    u_NoiseTexture: gl.getUniformLocation(displayProgram, "u_NoiseTexture")!,
   };
 
   let frameCount = 0;
@@ -237,15 +214,14 @@ void main() {
     }
 
     frameCount++;
-    if (frameCount < 800) {
+    if (frameCount < 12_000) {
       requestAnimationFrame(render);
     } else {
-      console.log("Rendering complete after 800 frames");
+      console.log("Rendering complete after 12_000 frames");
     }
   }
 
   requestAnimationFrame(render);
-
 } catch (err) {
   console.error("Error: ", err);
   alert("Error: " + err);

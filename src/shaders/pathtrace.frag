@@ -2,7 +2,7 @@
 precision highp float;
 
 #define MAX_TERM_COUNT 2
-#define MAX_BOUNCES 20
+#define MAX_BOUNCES 100
 #define ELLIPSOID_COUNT 5
 #define ELLIPSOID_VECTORS 3
 #define TRIANGLE_COUNT 12
@@ -66,8 +66,9 @@ QuadResult solveQuad(vec3 quads);
 
 int randIndex = 0;
 float getRand() {
-    vec2 uv = (v_WindowPixels + vec2(float(randIndex++) * 0.1, u_FrameCount * 0.01)) / u_Resolution;
-    vec2 sampleCoord = fract(v_WindowPixels / u_Resolution + vec2(float(randIndex) * 0.17, u_FrameCount * 0.03));
+    int idx = randIndex++;
+    vec2 pixelCoord = (v_WindowPixels + 1.0) * 0.5;
+    vec2 sampleCoord = fract(pixelCoord + vec2(float(idx) * 0.6180339887498949, u_FrameCount * 0.7548776662466927));
     return texture(u_NoiseTexture, sampleCoord).r;
 }
 
