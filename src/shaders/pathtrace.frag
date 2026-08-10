@@ -3,12 +3,13 @@ precision highp float;
 
 #define MAX_TERM_COUNT 2
 #define MAX_BOUNCES 20
-#define ELLIPSOID_COUNT 2
+#define ELLIPSOID_COUNT 5
 #define ELLIPSOID_VECTORS 3
 #define TRIANGLE_COUNT 12
 #define TRIANGLE_VECTORS 5
-#define BOUNCE_SUCCESS_PROBABILITY 0.8
+#define P_BOUNCE 0.5
 #define CLIP_VAL 0.00001
+#define SHADOW_CLIP 0.001
 
 struct Light {
     vec3 position;
@@ -57,49 +58,77 @@ uniform sampler2D u_AccumTexture;
 
 vec3 tracePath(vec3 startPoint, vec3 startDirection);
 vec3 calculateDirectIllumination(vec3 point, vec3 normal, vec3 color);
-vec3 getBounceDirection(vec3 normal);
+vec3 sampleBounceDirection(vec3 normal);
 Intersect calculateRayEllipsoidIntersect(vec3 point, vec3 direction, Ellipsoid ellipsoid);
 Intersect calculateRayTriangleIntersect(vec3 point, vec3 direction, Triangle triangle);
-Intersect findClosestIntersect(vec3 point, vec3 direction);
+Intersect findClosestIntersect(vec3 point, vec3 direction, bool skipFront);
 QuadResult solveQuad(vec3 quads);
-float randVal();
 
 int randIndex = 0;
 float getRand() {
     vec2 uv = (v_WindowPixels + vec2(float(randIndex++) * 0.1, u_FrameCount * 0.01)) / u_Resolution;
-    // Sample noise texture combined with pixel coordinate
     vec2 sampleCoord = fract(v_WindowPixels / u_Resolution + vec2(float(randIndex) * 0.17, u_FrameCount * 0.03));
     return texture(u_NoiseTexture, sampleCoord).r;
 }
 
 vec3 calculateDirectIllumination(vec3 point, vec3 normal, vec3 color) {
     vec3 pointToLight = u_Light.position - point;
-    vec3 lightDirection = normalize(pointToLight);
     float lightDistance = length(pointToLight);
-    vec3 shadowRayOrigin = point + normal * CLIP_VAL;
-    Intersect intersect = findClosestIntersect(shadowRayOrigin, lightDirection);
+    vec3 lightDirection = pointToLight / lightDistance;
+    vec3 shadowRayOrigin = point + normal * SHADOW_CLIP;
 
-    if(intersect.isExisting && intersect.distance < lightDistance) {
-        return vec3(0.0f, 0.0f, 0.0f);
+    for(int i = 0; i < ELLIPSOID_COUNT; i++) {
+        Ellipsoid ellipsoid;
+        ellipsoid.center = u_Ellipsoids[i * ELLIPSOID_VECTORS];
+        ellipsoid.radius = u_Ellipsoids[i * ELLIPSOID_VECTORS + 1];
+        ellipsoid.color = u_Ellipsoids[i * ELLIPSOID_VECTORS + 2];
+
+        Intersect shadowHit = calculateRayEllipsoidIntersect(shadowRayOrigin, lightDirection, ellipsoid);
+        if(shadowHit.isExisting && shadowHit.distance < lightDistance) {
+            return vec3(0.0f, 0.0f, 0.0f);
+        }
+    }
+
+    for(int i = 0; i < TRIANGLE_COUNT; i++) {
+        Triangle triangle;
+        triangle.vertex1 = u_Triangles[i * TRIANGLE_VECTORS];
+        triangle.vertex2 = u_Triangles[i * TRIANGLE_VECTORS + 1];
+        triangle.vertex3 = u_Triangles[i * TRIANGLE_VECTORS + 2];
+        triangle.normal = u_Triangles[i * TRIANGLE_VECTORS + 3];
+        triangle.color = u_Triangles[i * TRIANGLE_VECTORS + 4];
+
+        Intersect shadowHit = calculateRayTriangleIntersect(shadowRayOrigin, lightDirection, triangle);
+        if(shadowHit.isExisting && shadowHit.distance < lightDistance) {
+            return vec3(0.0f, 0.0f, 0.0f);
+        }
     }
 
     float ndotl = max(dot(normal, lightDirection), 0.0);
-    return u_Light.color * color * ndotl / lightDistance;
+    float G = ndotl / (1.0f + lightDistance * lightDistance);
+    return u_Light.color * color * G;
 }
 
-vec3 getBounceDirection(vec3 normal) {
-    float firstRand = getRand();
-    float secondRand = getRand();
-    float thirdRand = getRand();
-    vec3 direction = vec3(2.0f * firstRand - 1.0f, 2.0f * secondRand - 1.0f, 2.0f * thirdRand - 1.0f);
+vec3 sampleBounceDirection(vec3 normal) {
+    vec3 basis = abs(normal.x) > 0.9f ? vec3(0.0f, 1.0f, 0.0f) : vec3(1.0f, 0.0f, 0.0f);
+    vec3 tangent = normalize(cross(basis, normal));
+    vec3 bitangent = cross(normal, tangent);
 
-    if(dot(direction, direction) <= 1.0f) {
-        vec3 dir = normalize(direction);
-        if(dot(dir, normal) < 0.0f) dir = -dir;
-        return dir;
+    const int MAX_ITERS = 64;
+    vec3 result = normal;
+    for(int i = 0; i < MAX_ITERS; i++) {
+        float x = getRand() * 2.0f - 1.0f;
+        float y = getRand() * 2.0f - 1.0f;
+        float z = getRand() * 2.0f;
+        vec3 local = vec3(x, y, z);
+
+        if(dot(local, local) <= 1.0f) {
+            local = normalize(local);
+            result = local.x * tangent + local.y * bitangent + local.z * normal;
+            break;
+        }
     }
 
-    return normal;
+    return result;
 }
 
 Intersect calculateRayEllipsoidIntersect(vec3 point, vec3 direction, Ellipsoid ellipsoid) {
@@ -168,7 +197,7 @@ Intersect calculateRayTriangleIntersect(vec3 point, vec3 direction, Triangle tri
     return Intersect(true, term, intersect, triangle.color, triangle.normal);
 }
 
-Intersect findClosestIntersect(vec3 point, vec3 direction) {
+Intersect findClosestIntersect(vec3 point, vec3 direction, bool skipFront) {
     Intersect closestIntersect = Intersect(false, 0.0f, vec3(0.0f), vec3(0.0f), vec3(0.0f));
     float closestDistance = 1e20f;
 
@@ -179,6 +208,13 @@ Intersect findClosestIntersect(vec3 point, vec3 direction) {
         triangle.vertex3 = u_Triangles[i * TRIANGLE_VECTORS + 2];
         triangle.normal = u_Triangles[i * TRIANGLE_VECTORS + 3];
         triangle.color = u_Triangles[i * TRIANGLE_VECTORS + 4];
+
+        if(skipFront
+            && abs(triangle.vertex1.z) < 0.001f
+            && abs(triangle.vertex2.z) < 0.001f
+            && abs(triangle.vertex3.z) < 0.001f) {
+            continue;
+        }
 
         Intersect intersect = calculateRayTriangleIntersect(point, direction, triangle);
         if(intersect.isExisting && intersect.distance < closestDistance) {
@@ -228,31 +264,35 @@ QuadResult solveQuad(vec3 quads) {
 vec3 tracePath(vec3 startPoint, vec3 startDirection) {
     vec3 point = startPoint;
     vec3 direction = startDirection;
-    vec3 finalColor = vec3(0.0f);
+    vec3 accumulated = vec3(0.0f);
     vec3 throughput = vec3(1.0f);
 
-    for(int bounce = 0; bounce < MAX_BOUNCES; bounce++) {
-        Intersect intersect = findClosestIntersect(point, direction);
+    for(int depth = 0; depth < MAX_BOUNCES; depth++) {
+        Intersect hit = findClosestIntersect(point, direction, depth == 0);
 
-        if(!intersect.isExisting) {
+        if(!hit.isExisting) {
             break;
         }
 
-        finalColor += calculateDirectIllumination(intersect.intersect, intersect.normal, intersect.color) * throughput;
-        throughput *= intersect.color;
-        float r = getRand();
-        if(bounce > 0 && r > BOUNCE_SUCCESS_PROBABILITY) {
+        accumulated += throughput * calculateDirectIllumination(hit.intersect, hit.normal, hit.color);
+
+        if(depth > 1 && getRand() < P_BOUNCE) {
             break;
         }
-        throughput /= (bounce > 0 ? BOUNCE_SUCCESS_PROBABILITY : 1.0f);
+
+        vec3 bounceDirection = sampleBounceDirection(hit.normal);
+        float weight = max(dot(hit.normal, bounceDirection), 0.0f) / P_BOUNCE;
+        throughput *= hit.color * weight;
+
         if(max(throughput.r, max(throughput.g, throughput.b)) < 0.001f) {
             break;
         }
-        point = intersect.intersect + intersect.normal * CLIP_VAL;
-        direction = getBounceDirection(intersect.normal);
+
+        point = hit.intersect + hit.normal * CLIP_VAL;
+        direction = bounceDirection;
     }
 
-    return finalColor;
+    return accumulated;
 }
 
 void main() {
@@ -260,7 +300,7 @@ void main() {
     pos.x *= u_Resolution.x / u_Resolution.y;
 
     vec3 rayOrigin = u_Eye;
-    vec3 targetPoint = vec3((pos.xy + 1.0f) * 0.5f, u_Eye.z + 0.5f);
+    vec3 targetPoint = vec3((pos.xy + 1.0f) * 0.5f, 0.0f);
     vec3 rayDirection = normalize(targetPoint - rayOrigin);
 
     vec3 sampleColor = tracePath(rayOrigin, rayDirection);
