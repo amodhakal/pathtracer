@@ -88,6 +88,21 @@ const triangles = [
     normal: new Float32Array([0.0, 0.0, 1.0]),
     color: new Float32Array([0.0, 1.0, 0.0]),
   },
+
+  {
+    vertex1: new Float32Array([0.25, 0.96, -0.25]),
+    vertex2: new Float32Array([0.75, 0.96, -0.25]),
+    vertex3: new Float32Array([0.75, 0.96, 0.25]),
+    normal: new Float32Array([0.0, -1.0, 0.0]),
+    color: new Float32Array([2.0, 2.0, 2.0]),
+  },
+  {
+    vertex1: new Float32Array([0.25, 0.96, -0.25]),
+    vertex2: new Float32Array([0.75, 0.96, 0.25]),
+    vertex3: new Float32Array([0.25, 0.96, 0.25]),
+    normal: new Float32Array([0.0, -1.0, 0.0]),
+    color: new Float32Array([2.0, 2.0, 2.0]),
+  },
 ];
 
 const ellipsoids = [
@@ -111,8 +126,10 @@ export const vertices = new Float32Array([-1, 1, -1, -1, 1, 1, -1, -1, 1, -1, 1,
 export const eye = new Float32Array([0.5, 0.5, -0.4]);
 export const time = Date.now();
 export const light = {
-  position: new Float32Array([0.5, 0.9, 0.3]),
+  position: new Float32Array([0.5, 0.96, 0.0]),
   color: new Float32Array([1.0, 1.0, 1.0]),
+  normal: new Float32Array([0.0, -1.0, 0.0]),
+  size: new Float32Array([0.25, 0.25]),
 };
 
 triangles.forEach((triangle, i) => {

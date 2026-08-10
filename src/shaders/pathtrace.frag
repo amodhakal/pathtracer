@@ -5,8 +5,9 @@ precision highp float;
 #define MAX_BOUNCES 100
 #define ELLIPSOID_COUNT 5
 #define ELLIPSOID_VECTORS 3
-#define TRIANGLE_COUNT 12
+#define TRIANGLE_COUNT 14
 #define TRIANGLE_VECTORS 5
+#define LIGHT_SAMPLES 4
 #define P_BOUNCE 0.5
 #define CLIP_VAL 0.00001
 #define SHADOW_CLIP 0.001
@@ -14,6 +15,8 @@ precision highp float;
 struct Light {
     vec3 position;
     vec3 color;
+    vec3 normal;
+    vec2 size;
 };
 
 struct QuadResult {
@@ -63,6 +66,7 @@ Intersect calculateRayEllipsoidIntersect(vec3 point, vec3 direction, Ellipsoid e
 Intersect calculateRayTriangleIntersect(vec3 point, vec3 direction, Triangle triangle);
 Intersect findClosestIntersect(vec3 point, vec3 direction, bool skipFront);
 QuadResult solveQuad(vec3 quads);
+bool isEmitter(float r, float g, float b);
 
 int randIndex = 0;
 float getRand() {
@@ -72,41 +76,67 @@ float getRand() {
     return texture(u_NoiseTexture, sampleCoord).r;
 }
 
+bool isEmitter(float r, float g, float b) {
+    return r > 1.0f || g > 1.0f || b > 1.0f;
+}
+
 vec3 calculateDirectIllumination(vec3 point, vec3 normal, vec3 color) {
-    vec3 pointToLight = u_Light.position - point;
-    float lightDistance = length(pointToLight);
-    vec3 lightDirection = pointToLight / lightDistance;
-    vec3 shadowRayOrigin = point + normal * SHADOW_CLIP;
+    vec3 lightNormal = normalize(u_Light.normal);
+    vec3 basis = abs(lightNormal.x) > 0.9f ? vec3(0.0f, 1.0f, 0.0f) : vec3(1.0f, 0.0f, 0.0f);
+    vec3 lightTangent = normalize(cross(basis, lightNormal));
+    vec3 lightBitangent = cross(lightNormal, lightTangent);
 
-    for(int i = 0; i < ELLIPSOID_COUNT; i++) {
-        Ellipsoid ellipsoid;
-        ellipsoid.center = u_Ellipsoids[i * ELLIPSOID_VECTORS];
-        ellipsoid.radius = u_Ellipsoids[i * ELLIPSOID_VECTORS + 1];
-        ellipsoid.color = u_Ellipsoids[i * ELLIPSOID_VECTORS + 2];
+    vec3 accumulated = vec3(0.0f);
 
-        Intersect shadowHit = calculateRayEllipsoidIntersect(shadowRayOrigin, lightDirection, ellipsoid);
-        if(shadowHit.isExisting && shadowHit.distance < lightDistance) {
-            return vec3(0.0f, 0.0f, 0.0f);
+    for(int s = 0; s < LIGHT_SAMPLES; s++) {
+        vec2 areaSample = vec2(getRand(), getRand());
+        vec3 lightPoint = u_Light.position
+            + lightTangent * ((areaSample.x - 0.5f) * 2.0f * u_Light.size.x)
+            + lightBitangent * ((areaSample.y - 0.5f) * 2.0f * u_Light.size.y);
+
+        vec3 shadowRayOrigin = point + normal * SHADOW_CLIP;
+        vec3 pointToLight = lightPoint - shadowRayOrigin;
+        float lightDistance = length(pointToLight);
+        vec3 lightDirection = pointToLight / lightDistance;
+
+        bool occluded = false;
+
+        for(int i = 0; i < ELLIPSOID_COUNT && !occluded; i++) {
+            Ellipsoid ellipsoid;
+            ellipsoid.center = u_Ellipsoids[i * ELLIPSOID_VECTORS];
+            ellipsoid.radius = u_Ellipsoids[i * ELLIPSOID_VECTORS + 1];
+            ellipsoid.color = u_Ellipsoids[i * ELLIPSOID_VECTORS + 2];
+
+            Intersect shadowHit = calculateRayEllipsoidIntersect(shadowRayOrigin, lightDirection, ellipsoid);
+            if(shadowHit.isExisting && shadowHit.distance < lightDistance - SHADOW_CLIP) {
+                occluded = true;
+            }
         }
+
+        for(int i = 0; i < TRIANGLE_COUNT && !occluded; i++) {
+            Triangle triangle;
+            triangle.vertex1 = u_Triangles[i * TRIANGLE_VECTORS];
+            triangle.vertex2 = u_Triangles[i * TRIANGLE_VECTORS + 1];
+            triangle.vertex3 = u_Triangles[i * TRIANGLE_VECTORS + 2];
+            triangle.normal = u_Triangles[i * TRIANGLE_VECTORS + 3];
+            triangle.color = u_Triangles[i * TRIANGLE_VECTORS + 4];
+
+            Intersect shadowHit = calculateRayTriangleIntersect(shadowRayOrigin, lightDirection, triangle);
+            if(shadowHit.isExisting && shadowHit.distance < lightDistance - SHADOW_CLIP) {
+                occluded = true;
+            }
+        }
+
+        if(occluded) {
+            continue;
+        }
+
+        float ndotl = max(dot(normal, lightDirection), 0.0);
+        float G = ndotl / (1.0f + lightDistance * lightDistance);
+        accumulated += u_Light.color * color * G;
     }
 
-    for(int i = 0; i < TRIANGLE_COUNT; i++) {
-        Triangle triangle;
-        triangle.vertex1 = u_Triangles[i * TRIANGLE_VECTORS];
-        triangle.vertex2 = u_Triangles[i * TRIANGLE_VECTORS + 1];
-        triangle.vertex3 = u_Triangles[i * TRIANGLE_VECTORS + 2];
-        triangle.normal = u_Triangles[i * TRIANGLE_VECTORS + 3];
-        triangle.color = u_Triangles[i * TRIANGLE_VECTORS + 4];
-
-        Intersect shadowHit = calculateRayTriangleIntersect(shadowRayOrigin, lightDirection, triangle);
-        if(shadowHit.isExisting && shadowHit.distance < lightDistance) {
-            return vec3(0.0f, 0.0f, 0.0f);
-        }
-    }
-
-    float ndotl = max(dot(normal, lightDirection), 0.0);
-    float G = ndotl / (1.0f + lightDistance * lightDistance);
-    return u_Light.color * color * G;
+    return accumulated / float(LIGHT_SAMPLES);
 }
 
 vec3 sampleBounceDirection(vec3 normal) {
@@ -272,6 +302,11 @@ vec3 tracePath(vec3 startPoint, vec3 startDirection) {
         Intersect hit = findClosestIntersect(point, direction, depth == 0);
 
         if(!hit.isExisting) {
+            break;
+        }
+
+        if(isEmitter(hit.color.r, hit.color.g, hit.color.b)) {
+            accumulated += throughput * hit.color;
             break;
         }
 

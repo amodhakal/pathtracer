@@ -6,15 +6,24 @@
     <title>Pathtracing</title>
   </head>
   <body>
-    <canvas id="canvas" width="700" height="700"></canvas>
+    <canvas id="canvas"></canvas>
     <!-- <script src="https://greggman.github.io/webgl-lint/webgl-lint.js"></script> -->
     <script type="module" src="/src/main.ts"></script>
   </body>
 </html>
 
 <style>
+  html,
   body {
+    width: 100%;
+    height: 100%;
     margin: 0;
     overflow: hidden;
+  }
+
+  #canvas {
+    width: 100%;
+    height: 100%;
+    display: block;
   }
 </style>

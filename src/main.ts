@@ -3,7 +3,7 @@ import pathtraceFragCode from "./shaders/pathtrace.frag";
 import displayFragCode from "./shaders/display.frag";
 import noiseGenFragCode from "./shaders/noiseGen.frag";
 import { createProgram, createShader } from "./utils";
-import { vertices, time, flattenedTriangles, flattenedEllipsoids } from "./constants";
+import { vertices, time, flattenedTriangles, flattenedEllipsoids, light } from "./constants";
 
 const canvas = document.getElementById("canvas") as HTMLCanvasElement;
 const gl = canvas.getContext("webgl2");
@@ -38,71 +38,105 @@ try {
   const posLocDisplay = gl.getAttribLocation(displayProgram, "a_Position");
   const posLocNoise = gl.getAttribLocation(noiseProgram, "a_Position");
 
-  const textureWidth = canvas.width;
-  const textureHeight = canvas.height;
+  let textureWidth = 0;
+  let textureHeight = 0;
 
-  // --- Noise Texture & FBO ---
-  const noiseTexture = gl.createTexture();
-  gl.bindTexture(gl.TEXTURE_2D, noiseTexture);
-  gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, textureWidth, textureHeight, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
-  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
-  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
-  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
-  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+  let noiseTexture: WebGLTexture | null = null;
+  let noiseFBO: WebGLFramebuffer | null = null;
+  let accumTextureA: WebGLTexture | null = null;
+  let accumTextureB: WebGLTexture | null = null;
+  let fboA: WebGLFramebuffer | null = null;
+  let fboB: WebGLFramebuffer | null = null;
 
-  const noiseFBO = gl.createFramebuffer();
-  gl.bindFramebuffer(gl.FRAMEBUFFER, noiseFBO);
-  gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, noiseTexture, 0);
-  {
-    const status = gl.checkFramebufferStatus(gl.FRAMEBUFFER);
-    if (status !== gl.FRAMEBUFFER_COMPLETE) {
-      console.error("noiseFBO is incomplete:", status);
-    }
+  let readTex: WebGLTexture | null = null;
+  let writeFbo: WebGLFramebuffer | null = null;
+  let writeTex: WebGLTexture | null = null;
+
+  let frameCount = 0;
+  let renderLoopActive = false;
+
+  function createTexture(
+    width: number,
+    height: number,
+    internalFormat: number,
+    format: number,
+    type: number
+  ) {
+    if (!gl) return null;
+    const texture = gl.createTexture();
+    gl.bindTexture(gl.TEXTURE_2D, texture);
+    gl.texImage2D(gl.TEXTURE_2D, 0, internalFormat, width, height, 0, format, type, null);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    return texture;
   }
 
-  // --- Ping-Pong Accumulation Textures & FBOs ---
-  const accumTextureA = gl.createTexture();
-  gl.bindTexture(gl.TEXTURE_2D, accumTextureA);
-  gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA32F, textureWidth, textureHeight, 0, gl.RGBA, gl.FLOAT, null);
-  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
-  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+  function setupFramebuffers(width: number, height: number) {
+    if (!gl) return;
+    if (noiseTexture) gl.deleteTexture(noiseTexture);
+    if (noiseFBO) gl.deleteFramebuffer(noiseFBO);
+    if (accumTextureA) gl.deleteTexture(accumTextureA);
+    if (accumTextureB) gl.deleteTexture(accumTextureB);
+    if (fboA) gl.deleteFramebuffer(fboA);
+    if (fboB) gl.deleteFramebuffer(fboB);
 
-  const accumTextureB = gl.createTexture();
-  gl.bindTexture(gl.TEXTURE_2D, accumTextureB);
-  gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA32F, textureWidth, textureHeight, 0, gl.RGBA, gl.FLOAT, null);
-  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
-  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+    textureWidth = width;
+    textureHeight = height;
 
-  const fboA = gl.createFramebuffer();
-  gl.bindFramebuffer(gl.FRAMEBUFFER, fboA);
-  gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, accumTextureA, 0);
-  {
-    const status = gl.checkFramebufferStatus(gl.FRAMEBUFFER);
-    if (status !== gl.FRAMEBUFFER_COMPLETE) {
-      console.error("fboA is incomplete:", status);
+    // --- Noise Texture & FBO ---
+    noiseTexture = createTexture(width, height, gl.RGBA8, gl.RGBA, gl.UNSIGNED_BYTE);
+    noiseFBO = gl.createFramebuffer();
+    gl.bindFramebuffer(gl.FRAMEBUFFER, noiseFBO);
+    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, noiseTexture, 0);
+    {
+      const status = gl.checkFramebufferStatus(gl.FRAMEBUFFER);
+      if (status !== gl.FRAMEBUFFER_COMPLETE) {
+        console.error("noiseFBO is incomplete:", status);
+      }
     }
-  }
 
-  const fboB = gl.createFramebuffer();
-  gl.bindFramebuffer(gl.FRAMEBUFFER, fboB);
-  gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, accumTextureB, 0);
-  {
-    const status = gl.checkFramebufferStatus(gl.FRAMEBUFFER);
-    if (status !== gl.FRAMEBUFFER_COMPLETE) {
-      console.error("fboB is incomplete:", status);
+    // --- Ping-Pong Accumulation Textures & FBOs ---
+    accumTextureA = createTexture(width, height, gl.RGBA32F, gl.RGBA, gl.FLOAT);
+    accumTextureB = createTexture(width, height, gl.RGBA32F, gl.RGBA, gl.FLOAT);
+
+    fboA = gl.createFramebuffer();
+    gl.bindFramebuffer(gl.FRAMEBUFFER, fboA);
+    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, accumTextureA, 0);
+    {
+      const status = gl.checkFramebufferStatus(gl.FRAMEBUFFER);
+      if (status !== gl.FRAMEBUFFER_COMPLETE) {
+        console.error("fboA is incomplete:", status);
+      }
     }
+
+    fboB = gl.createFramebuffer();
+    gl.bindFramebuffer(gl.FRAMEBUFFER, fboB);
+    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, accumTextureB, 0);
+    {
+      const status = gl.checkFramebufferStatus(gl.FRAMEBUFFER);
+      if (status !== gl.FRAMEBUFFER_COMPLETE) {
+        console.error("fboB is incomplete:", status);
+      }
+    }
+
+    // Clear both accumulation FBOs to black
+    gl.bindFramebuffer(gl.FRAMEBUFFER, fboA);
+    gl.clearColor(0, 0, 0, 1);
+    gl.clear(gl.COLOR_BUFFER_BIT);
+
+    gl.bindFramebuffer(gl.FRAMEBUFFER, fboB);
+    gl.clearColor(0, 0, 0, 1);
+    gl.clear(gl.COLOR_BUFFER_BIT);
+
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+
+    readTex = accumTextureA;
+    writeFbo = fboB;
+    writeTex = accumTextureB;
+    frameCount = 0;
   }
-
-  // Clear both accumulation FBOs to black
-  gl.bindFramebuffer(gl.FRAMEBUFFER, fboA);
-  gl.clearColor(0, 0, 0, 1);
-  gl.clear(gl.COLOR_BUFFER_BIT);
-
-  gl.bindFramebuffer(gl.FRAMEBUFFER, fboB);
-  gl.clearColor(0, 0, 0, 1);
-  gl.clear(gl.COLOR_BUFFER_BIT);
-
-  gl.bindFramebuffer(gl.FRAMEBUFFER, null);
 
   // Uniform locations
   const pathtraceUniforms = {
@@ -110,6 +144,8 @@ try {
     u_Light: {
       position: gl.getUniformLocation(pathtraceProgram, "u_Light.position")!,
       color: gl.getUniformLocation(pathtraceProgram, "u_Light.color")!,
+      normal: gl.getUniformLocation(pathtraceProgram, "u_Light.normal")!,
+      size: gl.getUniformLocation(pathtraceProgram, "u_Light.size")!,
     },
     u_Ellipsoids: gl.getUniformLocation(pathtraceProgram, "u_Ellipsoids")!,
     u_Triangles: gl.getUniformLocation(pathtraceProgram, "u_Triangles")!,
@@ -128,11 +164,6 @@ try {
   const displayUniforms = {
     u_NoiseTexture: gl.getUniformLocation(displayProgram, "u_NoiseTexture")!,
   };
-
-  let frameCount = 0;
-  let readTex = accumTextureA;
-  let writeFbo = fboB;
-  let writeTex = accumTextureB;
 
   function renderNoise() {
     if (!gl) return;
@@ -170,8 +201,10 @@ try {
     gl.uniform1i(pathtraceUniforms.u_AccumTexture, 1);
 
     gl.uniform3fv(pathtraceUniforms.u_Eye, new Float32Array([0.5, 0.5, -0.4]));
-    gl.uniform3fv(pathtraceUniforms.u_Light.position, new Float32Array([0.5, 0.9, 0.3]));
-    gl.uniform3fv(pathtraceUniforms.u_Light.color, new Float32Array([1.0, 1.0, 1.0]));
+    gl.uniform3fv(pathtraceUniforms.u_Light.position, light.position);
+    gl.uniform3fv(pathtraceUniforms.u_Light.color, light.color);
+    gl.uniform3fv(pathtraceUniforms.u_Light.normal, light.normal);
+    gl.uniform2fv(pathtraceUniforms.u_Light.size, light.size);
     gl.uniform3fv(pathtraceUniforms.u_Ellipsoids, flattenedEllipsoids);
     gl.uniform3fv(pathtraceUniforms.u_Triangles, flattenedTriangles);
     gl.uniform1f(pathtraceUniforms.u_Time, Date.now() - time);
@@ -198,7 +231,7 @@ try {
     gl.drawArrays(gl.TRIANGLES, 0, 6);
   }
 
-  function render() {
+function render() {
     renderNoise();
     renderPathtrace();
     renderDisplay();
@@ -217,11 +250,34 @@ try {
     if (frameCount < 12_000) {
       requestAnimationFrame(render);
     } else {
+      renderLoopActive = false;
       console.log("Rendering complete after 12_000 frames");
     }
   }
 
-  requestAnimationFrame(render);
+  function startRenderLoop() {
+    if (renderLoopActive) return;
+    renderLoopActive = true;
+    requestAnimationFrame(render);
+  }
+
+  function resizeCanvas() {
+    const dpr = window.devicePixelRatio || 1;
+    const width = Math.max(1, Math.round(canvas.clientWidth * dpr));
+    const height = Math.max(1, Math.round(canvas.clientHeight * dpr));
+
+    if (canvas.width === width && canvas.height === height) return;
+
+    canvas.width = width;
+    canvas.height = height;
+    setupFramebuffers(width, height);
+    startRenderLoop();
+  }
+
+  resizeCanvas();
+  new ResizeObserver(resizeCanvas).observe(canvas);
+  window.addEventListener("resize", resizeCanvas);
+  startRenderLoop();
 } catch (err) {
   console.error("Error: ", err);
   alert("Error: " + err);
