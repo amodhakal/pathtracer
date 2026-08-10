@@ -110,20 +110,23 @@ const ellipsoids = [
     position: new Float32Array([0.5, 0.5, 0.5]),
     radius: new Float32Array([0.2, 0.2, 0.2]),
     color: new Float32Array([1.0, 0.8, 0.0]),
+    material: new Float32Array([0.0, 0.0, 0.0]),
   },
   {
     position: new Float32Array([0.3, 0.3, 0.3]),
     radius: new Float32Array([0.1, 0.1, 0.1]),
     color: new Float32Array([0.9, 0.9, 0.9]),
+    material: new Float32Array([1.0, 1.0, 0.0]),
   },
   {
     position: new Float32Array([0.7, 0.4, 0.0]),
     radius: new Float32Array([0.15, 0.15, 0.15]),
-    color: new Float32Array([1.0, 0.2, 0.2]),
+    color: new Float32Array([1.0, 1.0, 1.0]),
+    material: new Float32Array([2.0, 1.33, 0.05]),
   },
 ];
 
-const ELLIPSOID_VEC_VALUE_COUNT = 9;
+const ELLIPSOID_VEC_VALUE_COUNT = 12;
 const TRIANGLE_VEC_VALUE_COUNT = 15;
 export const flattenedTriangles = new Float32Array(triangles.length * TRIANGLE_VEC_VALUE_COUNT);
 export const flattenedEllipsoids = new Float32Array(ellipsoids.length * ELLIPSOID_VEC_VALUE_COUNT);
@@ -151,4 +154,5 @@ ellipsoids.forEach((ellipsoid, i) => {
   flattenedEllipsoids.set(ellipsoid.position, offset);
   flattenedEllipsoids.set(ellipsoid.radius, offset + 3);
   flattenedEllipsoids.set(ellipsoid.color, offset + 6);
+  flattenedEllipsoids.set(ellipsoid.material, offset + 9);
 });

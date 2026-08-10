@@ -2,9 +2,9 @@
 precision highp float;
 
 #define MAX_TERM_COUNT 2
-#define MAX_BOUNCES 50
+#define MAX_BOUNCES 200
 #define ELLIPSOID_COUNT 5
-#define ELLIPSOID_VECTORS 3
+#define ELLIPSOID_VECTORS 4
 #define TRIANGLE_COUNT 14
 #define TRIANGLE_VECTORS 5
 #define LIGHT_SAMPLES 4
@@ -28,6 +28,7 @@ struct Ellipsoid {
     vec3 center;
     vec3 radius;
     vec3 color;
+    vec3 material;
 };
 
 struct Triangle {
@@ -44,6 +45,7 @@ struct Intersect {
     vec3 intersect;
     vec3 color;
     vec3 normal;
+    vec3 material;
 };
 
 in vec2 v_WindowPixels;
@@ -67,6 +69,9 @@ Intersect calculateRayTriangleIntersect(vec3 point, vec3 direction, Triangle tri
 Intersect findClosestIntersect(vec3 point, vec3 direction, bool skipFront);
 QuadResult solveQuad(vec3 quads);
 bool isEmitter(float r, float g, float b);
+float fresnelSchlick(float cosTheta, float ior);
+vec3 calculateReflection(vec3 incident, vec3 faceNormal);
+vec3 calculateRefraction(vec3 incident, vec3 faceNormal, float ior);
 
 int randIndex = 0;
 float getRand() {
@@ -78,6 +83,31 @@ float getRand() {
 
 bool isEmitter(float r, float g, float b) {
     return r > 1.0f || g > 1.0f || b > 1.0f;
+}
+
+float fresnelSchlick(float cosTheta, float ior) {
+    float f0 = (ior - 1.0f) / (ior + 1.0f);
+    f0 *= f0;
+    return f0 + (1.0f - f0) * pow(1.0f - cosTheta, 5.0f);
+}
+
+vec3 calculateReflection(vec3 incident, vec3 faceNormal) {
+    return incident - 2.0f * dot(faceNormal, incident) * faceNormal;
+}
+
+vec3 calculateRefraction(vec3 incident, vec3 faceNormal, float ior) {
+    float entering = dot(incident, faceNormal) < 0.0f ? 1.0f : 0.0f;
+    vec3 n = entering > 0.5f ? faceNormal : -faceNormal;
+    float eta = entering > 0.5f ? 1.0f / ior : ior;
+
+    float cosI = -dot(n, incident);
+    float sinT2 = eta * eta * (1.0f - cosI * cosI);
+    if(sinT2 >= 1.0f) {
+        return vec3(0.0f);
+    }
+
+    float cosT = sqrt(1.0f - sinT2);
+    return eta * incident + (eta * cosI - cosT) * n;
 }
 
 vec3 calculateDirectIllumination(vec3 point, vec3 normal, vec3 color) {
@@ -106,6 +136,7 @@ vec3 calculateDirectIllumination(vec3 point, vec3 normal, vec3 color) {
             ellipsoid.center = u_Ellipsoids[i * ELLIPSOID_VECTORS];
             ellipsoid.radius = u_Ellipsoids[i * ELLIPSOID_VECTORS + 1];
             ellipsoid.color = u_Ellipsoids[i * ELLIPSOID_VECTORS + 2];
+            ellipsoid.material = u_Ellipsoids[i * ELLIPSOID_VECTORS + 3];
 
             Intersect shadowHit = calculateRayEllipsoidIntersect(shadowRayOrigin, lightDirection, ellipsoid);
             if(shadowHit.isExisting && shadowHit.distance < lightDistance - SHADOW_CLIP) {
@@ -187,14 +218,14 @@ Intersect calculateRayEllipsoidIntersect(vec3 point, vec3 direction, Ellipsoid e
         vec3 normal = intersect - ellipsoid.center;
         normal /= ellipsoid.radius * ellipsoid.radius;
         normal = normalize(normal);
-        return Intersect(true, term, intersect, ellipsoid.color, normal);
+        return Intersect(true, term, intersect, ellipsoid.color, normal, ellipsoid.material);
     }
 
-    return Intersect(false, 0.0f, vec3(0.0f), vec3(0.0f), vec3(0.0f));
+    return Intersect(false, 0.0f, vec3(0.0f), vec3(0.0f), vec3(0.0f), vec3(0.0f));
 }
 
 Intersect calculateRayTriangleIntersect(vec3 point, vec3 direction, Triangle triangle) {
-    Intersect noIntersection = Intersect(false, 0.0f, vec3(0.0f), vec3(0.0f), vec3(0.0f));
+    Intersect noIntersection = Intersect(false, 0.0f, vec3(0.0f), vec3(0.0f), vec3(0.0f), vec3(0.0f));
 
     vec3 triangleEdge1 = triangle.vertex2 - triangle.vertex1;
     vec3 triangleEdge2 = triangle.vertex3 - triangle.vertex1;
@@ -225,11 +256,11 @@ Intersect calculateRayTriangleIntersect(vec3 point, vec3 direction, Triangle tri
     }
 
     vec3 intersect = point + direction * term;
-    return Intersect(true, term, intersect, triangle.color, triangle.normal);
+    return Intersect(true, term, intersect, triangle.color, triangle.normal, vec3(0.0f));
 }
 
 Intersect findClosestIntersect(vec3 point, vec3 direction, bool skipFront) {
-    Intersect closestIntersect = Intersect(false, 0.0f, vec3(0.0f), vec3(0.0f), vec3(0.0f));
+    Intersect closestIntersect = Intersect(false, 0.0f, vec3(0.0f), vec3(0.0f), vec3(0.0f), vec3(0.0f));
     float closestDistance = 1e20f;
 
     for(int i = 0; i < TRIANGLE_COUNT; i++) {
@@ -259,6 +290,7 @@ Intersect findClosestIntersect(vec3 point, vec3 direction, bool skipFront) {
         ellipsoid.center = u_Ellipsoids[i * ELLIPSOID_VECTORS];
         ellipsoid.radius = u_Ellipsoids[i * ELLIPSOID_VECTORS + 1];
         ellipsoid.color = u_Ellipsoids[i * ELLIPSOID_VECTORS + 2];
+        ellipsoid.material = u_Ellipsoids[i * ELLIPSOID_VECTORS + 3];
 
         Intersect intersect = calculateRayEllipsoidIntersect(point, direction, ellipsoid);
         if(intersect.isExisting && intersect.distance < closestDistance) {
@@ -308,6 +340,50 @@ vec3 tracePath(vec3 startPoint, vec3 startDirection) {
         if(isEmitter(hit.color.r, hit.color.g, hit.color.b)) {
             accumulated += throughput * hit.color;
             break;
+        }
+
+        int materialType = int(hit.material.x + 0.5f);
+
+        if(materialType == 1) {
+            direction = calculateReflection(direction, hit.normal);
+            point = hit.intersect + hit.normal * CLIP_VAL;
+            throughput *= hit.color;
+
+            if(depth > 1 && getRand() < P_BOUNCE) {
+                break;
+            }
+
+            continue;
+        }
+
+        if(materialType == 2) {
+            float opacity = hit.material.z;
+
+            if(getRand() >= opacity) {
+                accumulated += throughput * calculateDirectIllumination(hit.intersect, hit.normal, hit.color);
+
+                vec3 refracted = calculateRefraction(direction, hit.normal, hit.material.y);
+                vec3 reflected = calculateReflection(direction, hit.normal);
+
+                float cosTheta = abs(dot(hit.normal, direction));
+                float fresnel = fresnelSchlick(cosTheta, hit.material.y);
+
+                bool isReflecting = refracted == vec3(0.0f) || getRand() < fresnel;
+                direction = isReflecting ? reflected : refracted;
+                vec3 travelSide = dot(direction, hit.normal) < 0.0f ? -hit.normal : hit.normal;
+                point = hit.intersect + travelSide * CLIP_VAL;
+                throughput *= mix(vec3(1.0f), hit.color, opacity);
+
+                if(depth > 1 && getRand() < P_BOUNCE) {
+                    break;
+                }
+
+                if(max(throughput.r, max(throughput.g, throughput.b)) < 0.001f) {
+                    break;
+                }
+
+                continue;
+            }
         }
 
         accumulated += throughput * calculateDirectIllumination(hit.intersect, hit.normal, hit.color);
