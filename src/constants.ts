@@ -1,3 +1,5 @@
+export const IS_PATHTRACING = false;
+
 const triangles = [
   {
     vertex1: new Float32Array([0.0, 0.0, -1.0]),

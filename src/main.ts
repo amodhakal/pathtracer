@@ -1,9 +1,17 @@
 import vertexCode from "./shaders/shaders.vert";
 import pathtraceFragCode from "./shaders/pathtrace.frag";
+import localFragCode from "./shaders/local.frag";
 import displayFragCode from "./shaders/display.frag";
 import noiseGenFragCode from "./shaders/noiseGen.frag";
 import { createProgram, createShader } from "./utils";
-import { vertices, time, flattenedTriangles, flattenedEllipsoids, light } from "./constants";
+import { vertices, time, flattenedTriangles, flattenedEllipsoids, light, IS_PATHTRACING } from "./constants";
+import { load } from "@loaders.gl/core";
+import { GLBLoader } from "@loaders.gl/gltf";
+
+const FRAME_COUNT = 12_000
+
+const gltf = await load("/pathtracer/lion_crushing_a_serpent.glb", GLBLoader);
+console.log(gltf);
 
 const canvas = document.getElementById("canvas") as HTMLCanvasElement;
 const gl = canvas.getContext("webgl2");
@@ -24,6 +32,9 @@ try {
   const pathtraceShader = createShader(gl, gl.FRAGMENT_SHADER, pathtraceFragCode);
   const pathtraceProgram = createProgram(gl, vertexShader, pathtraceShader);
 
+  const localShader = createShader(gl, gl.FRAGMENT_SHADER, localFragCode);
+  const localProgram = createProgram(gl, vertexShader, localShader);
+
   const displayShader = createShader(gl, gl.FRAGMENT_SHADER, displayFragCode);
   const displayProgram = createProgram(gl, vertexShader, displayShader);
 
@@ -35,6 +46,7 @@ try {
   gl.bufferData(gl.ARRAY_BUFFER, vertices, gl.STATIC_DRAW);
 
   const posLocPathtrace = gl.getAttribLocation(pathtraceProgram, "a_Position");
+  const posLocLocal = gl.getAttribLocation(localProgram, "a_Position");
   const posLocDisplay = gl.getAttribLocation(displayProgram, "a_Position");
   const posLocNoise = gl.getAttribLocation(noiseProgram, "a_Position");
 
@@ -55,13 +67,7 @@ try {
   let frameCount = 0;
   let renderLoopActive = false;
 
-  function createTexture(
-    width: number,
-    height: number,
-    internalFormat: number,
-    format: number,
-    type: number
-  ) {
+  function createTexture(width: number, height: number, internalFormat: number, format: number, type: number) {
     if (!gl) return null;
     const texture = gl.createTexture();
     gl.bindTexture(gl.TEXTURE_2D, texture);
@@ -161,6 +167,20 @@ try {
     u_Resolution: gl.getUniformLocation(noiseProgram, "u_Resolution")!,
   };
 
+  const localUniforms = {
+    u_Eye: gl.getUniformLocation(localProgram, "u_Eye")!,
+    u_Light: {
+      position: gl.getUniformLocation(localProgram, "u_Light.position")!,
+      color: gl.getUniformLocation(localProgram, "u_Light.color")!,
+      normal: gl.getUniformLocation(localProgram, "u_Light.normal")!,
+      size: gl.getUniformLocation(localProgram, "u_Light.size")!,
+    },
+    u_Ellipsoids: gl.getUniformLocation(localProgram, "u_Ellipsoids")!,
+    u_Triangles: gl.getUniformLocation(localProgram, "u_Triangles")!,
+    u_Resolution: gl.getUniformLocation(localProgram, "u_Resolution")!,
+  };
+
+
   const displayUniforms = {
     u_NoiseTexture: gl.getUniformLocation(displayProgram, "u_NoiseTexture")!,
   };
@@ -231,27 +251,52 @@ try {
     gl.drawArrays(gl.TRIANGLES, 0, 6);
   }
 
-function render() {
-    renderNoise();
-    renderPathtrace();
-    renderDisplay();
+  function renderLocal() {
+    if (!gl) return;
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    gl.viewport(0, 0, canvas.width, canvas.height);
+    gl.useProgram(localProgram);
 
-    if (readTex === accumTextureA) {
-      readTex = accumTextureB;
-      writeFbo = fboA;
-      writeTex = accumTextureA;
-    } else {
-      readTex = accumTextureA;
-      writeFbo = fboB;
-      writeTex = accumTextureB;
-    }
+    gl.enableVertexAttribArray(posLocLocal);
+    gl.vertexAttribPointer(posLocLocal, 2, gl.FLOAT, false, 0, 0);
 
-    frameCount++;
-    if (frameCount < 12_000) {
-      requestAnimationFrame(render);
+    gl.uniform3fv(localUniforms.u_Eye, new Float32Array([0.5, 0.5, -0.4]));
+    gl.uniform3fv(localUniforms.u_Light.position, light.position);
+    gl.uniform3fv(localUniforms.u_Light.color, light.color);
+    gl.uniform3fv(localUniforms.u_Light.normal, light.normal);
+    gl.uniform2fv(localUniforms.u_Light.size, light.size);
+    gl.uniform3fv(localUniforms.u_Ellipsoids, flattenedEllipsoids);
+    gl.uniform3fv(localUniforms.u_Triangles, flattenedTriangles);
+    gl.uniform2f(localUniforms.u_Resolution, canvas.width, canvas.height);
+
+    gl.drawArrays(gl.TRIANGLES, 0, 6);
+  }
+
+  function render() {
+    if (IS_PATHTRACING) {
+      renderNoise();
+      renderPathtrace();
+      renderDisplay();
+
+      if (readTex === accumTextureA) {
+        readTex = accumTextureB;
+        writeFbo = fboA;
+        writeTex = accumTextureA;
+      } else {
+        readTex = accumTextureA;
+        writeFbo = fboB;
+        writeTex = accumTextureB;
+      }
+
+      frameCount++;
+      if (frameCount < FRAME_COUNT) {
+        requestAnimationFrame(render);
+      } else {
+        renderLoopActive = false;
+        console.log(`Rendering complete after ${FRAME_COUNT} frames`);
+      }
     } else {
-      renderLoopActive = false;
-      console.log("Rendering complete after 12_000 frames");
+      renderLocal();
     }
   }
 
