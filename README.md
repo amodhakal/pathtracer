@@ -72,3 +72,7 @@ Scene geometry and materials are declared in `src/constants.ts` and uploaded to 
         ├── display.frag       # Final tone-map / display pass
         └── shaders.vert       # Fullscreen-triangle vertex shader
 ```
+
+## Attributions
+
+Model from "Lion Crushing a Serpent" (https://skfb.ly/68s9T) by Rigsters is licensed under Creative Commons Attribution (http://creativecommons.org/licenses/by/4.0/).
