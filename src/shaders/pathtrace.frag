@@ -45,6 +45,11 @@ uniform vec3 u_EnvBottom;
 uniform float u_EnvIntensity;
 uniform sampler2D u_AccumTexture;
 
+// Issue #58: thin-lens camera. u_ApertureRadius is the lens radius (0 disables
+// DOF); u_FocalDistance places the sharp focal plane along the view direction.
+uniform float u_ApertureRadius;
+uniform float u_FocalDistance;
+
 // Issue #57: albedo and normal map texture arrays. Each scene triangle can
 // reference one albedo map (id in hit.textures.x) and one normal map
 // (hit.textures.y); -1 means "no texture". MAX_TEXTURES is the array bound.
@@ -593,8 +598,40 @@ void main() {
     float pixelSize = 2.0f / u_Resolution.y;
     vec2 jitter = (vec2(getRand(), getRand()) - 0.5f) * pixelSize;
 
+    // Issue #58: thin-lens depth of field, composed with the issue #12
+    // sub-pixel jitter. The pinhole ray toward the (jittered) pixel target
+    // defines where the focal plane is pierced; the actual sample then shoots
+    // from a random point on the aperture disk through that same focal point.
+    // Averaged over accumulated frames this converges to the thin-lens circle-
+    // of-confusion blur, and the per-frame jitter keeps it noise-free over time.
     vec3 rayOrigin = u_Eye;
     vec3 rayDirection = generateCameraRay(v_WindowPixels.xy + jitter, u_Resolution, u_Eye);
+
+    // Issue #58: thin-lens depth of field, composed with the issue #12 sub-pixel
+    // jitter and the issue #21 FOV camera model. The pinhole ray defines where the
+    // focal plane is pierced; the actual sample shoots from a random point on the
+    // aperture disk through that same focal point. Averaged over accumulated frames
+    // this converges to the thin-lens circle-of-confusion blur.
+    if(u_ApertureRadius > 0.0f) {
+        float focalT = u_FocalDistance / dot(rayDirection, normalize(generateCameraRay(vec2(0.0f), u_Resolution, u_Eye)));
+        vec3 focalPoint = u_Eye + focalT * rayDirection;
+
+        // Uniform disk sample (rejection-free): r = sqrt(u1), phi = 2*PI*u2.
+        float u1 = getRand();
+        float u2 = getRand();
+        vec2 disk = u_ApertureRadius * sqrt(u1)
+            * vec2(cos(6.283185307179586f * u2), sin(6.283185307179586f * u2));
+
+        // Build an orthonormal frame around the view direction for the lens.
+        vec3 forward = normalize(rayDirection);
+        vec3 basis = abs(forward.x) > 0.9f ? vec3(0.0f, 1.0f, 0.0f) : vec3(1.0f, 0.0f, 0.0f);
+        vec3 right = normalize(cross(basis, forward));
+        vec3 up = cross(forward, right);
+
+        vec3 lensPoint = u_Eye + disk.x * right + disk.y * up;
+        rayOrigin = lensPoint;
+        rayDirection = normalize(focalPoint - lensPoint);
+    }
 
     vec3 sampleColor = tracePath(rayOrigin, rayDirection);
 

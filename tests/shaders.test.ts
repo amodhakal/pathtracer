@@ -38,4 +38,17 @@ describe("shader sources", () => {
     expect(source).toContain("initRng(");
     expect(source).not.toContain("u_NoiseTexture");
   });
+
+  // Issue #58: thin-lens depth of field — the path tracer must declare the
+  // aperture/focal uniforms and sample the lens disk after sub-pixel jitter.
+  it("implements thin-lens DOF with jitter composition in the path tracer", () => {
+    const pathtrace = readFileSync(join(shaderDir, "pathtrace.frag"), "utf8");
+    expect(pathtrace).toContain("uniform float u_ApertureRadius");
+    expect(pathtrace).toContain("uniform float u_FocalDistance");
+    // Aperture sampling happens after (composing with) the pixel jitter.
+    const jitterIdx = pathtrace.indexOf("vec2 jitter =");
+    const dofIdx = pathtrace.indexOf("u_ApertureRadius > 0.0f");
+    expect(jitterIdx).toBeGreaterThan(-1);
+    expect(dofIdx).toBeGreaterThan(jitterIdx);
+  });
 });

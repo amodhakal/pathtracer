@@ -12,7 +12,15 @@ export interface GLContext {
  */
 export function initGLContext(): GLContext {
   const canvas = document.getElementById("canvas") as HTMLCanvasElement;
-  const gl = canvas.getContext("webgl2");
+  // Issue #51: explicit context options instead of relying on defaults.
+  const gl = canvas.getContext("webgl2", {
+    antialias: false,
+    powerPreference: "high-performance",
+    depth: false,
+    stencil: false,
+    alpha: false,
+    preserveDrawingBuffer: false,
+  });
   if (!gl) {
     reportError("WebGL2 not supported");
     throw new Error("WebGL2 not supported");
