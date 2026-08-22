@@ -1,15 +1,11 @@
 #version 300 es
 precision highp float;
 
-#define MAX_TERM_COUNT 2
+#include <common>
+
 #define MAX_BOUNCES 200
-#define ELLIPSOID_COUNT 5
-#define ELLIPSOID_VECTORS 4
-#define TRIANGLE_COUNT 14
-#define TRIANGLE_VECTORS 5
 #define LIGHT_SAMPLES 4
 #define P_BOUNCE 0.5
-#define CLIP_VAL 0.00001
 #define SHADOW_CLIP 0.001
 
 // Issue #35: firefly clamping — bound each sample's radiance before it is
@@ -71,13 +67,11 @@ uniform float u_FrameCount;
 uniform sampler2D u_NoiseTexture;
 uniform sampler2D u_AccumTexture;
 
+#include <intersection>
+
 vec3 tracePath(vec3 startPoint, vec3 startDirection);
 vec3 calculateDirectIllumination(vec3 point, vec3 normal, vec3 color);
 vec3 sampleBounceDirection(vec3 normal);
-Intersect calculateRayEllipsoidIntersect(vec3 point, vec3 direction, Ellipsoid ellipsoid);
-Intersect calculateRayTriangleIntersect(vec3 point, vec3 direction, Triangle triangle);
-Intersect findClosestIntersect(vec3 point, vec3 direction);
-QuadResult solveQuad(vec3 quads);
 bool isEmitter(float r, float g, float b);
 float fresnelSchlick(float cosTheta, float ior);
 vec3 calculateReflection(vec3 incident, vec3 faceNormal);
@@ -213,138 +207,6 @@ vec3 sampleBounceDirection(vec3 normal) {
     }
 
     return result;
-}
-
-Intersect calculateRayEllipsoidIntersect(vec3 point, vec3 direction, Ellipsoid ellipsoid) {
-    vec3 firstResult = direction / ellipsoid.radius;
-    vec3 secondResult = point - ellipsoid.center;
-    vec3 thirdResult = secondResult / ellipsoid.radius;
-
-    float quadA = dot(firstResult, firstResult);
-    float quadB = 2.0f * dot(firstResult, thirdResult);
-    float quadC = dot(thirdResult, thirdResult) - 1.0f;
-
-    QuadResult result = solveQuad(vec3(quadA, quadB, quadC));
-
-    for(int idx = 0; idx < MAX_TERM_COUNT; idx++) {
-        if(idx >= result.termCount) {
-            break;
-        }
-
-        float term = result.terms[idx];
-        if(term < CLIP_VAL) {
-            continue;
-        }
-
-        vec3 intersect = point + direction * term;
-        vec3 normal = intersect - ellipsoid.center;
-        normal /= ellipsoid.radius * ellipsoid.radius;
-        normal = normalize(normal);
-        return Intersect(true, term, intersect, ellipsoid.color, normal, ellipsoid.material);
-    }
-
-    return Intersect(false, 0.0f, vec3(0.0f), vec3(0.0f), vec3(0.0f), vec3(0.0f));
-}
-
-Intersect calculateRayTriangleIntersect(vec3 point, vec3 direction, Triangle triangle) {
-    Intersect noIntersection = Intersect(false, 0.0f, vec3(0.0f), vec3(0.0f), vec3(0.0f), vec3(0.0f));
-
-    vec3 triangleEdge1 = triangle.vertex2 - triangle.vertex1;
-    vec3 triangleEdge2 = triangle.vertex3 - triangle.vertex1;
-
-    vec3 orthogonal = cross(direction, triangleEdge2);
-    float determinant = dot(triangleEdge1, orthogonal);
-    if(abs(determinant) < CLIP_VAL) {
-        return noIntersection;
-    }
-
-    float inverseDeterminant = 1.0f / determinant;
-    vec3 pointToVertex = point - triangle.vertex1;
-    float uValue = dot(pointToVertex, orthogonal) * inverseDeterminant;
-    if(uValue < 0.0f || uValue > 1.0f) {
-        return noIntersection;
-    }
-
-    vec3 crossVector = cross(pointToVertex, triangleEdge1);
-    float vValue = dot(direction, crossVector) * inverseDeterminant;
-
-    if(vValue < 0.0f || uValue + vValue > 1.0f) {
-        return noIntersection;
-    }
-
-    float term = dot(triangleEdge2, crossVector) * inverseDeterminant;
-    if(term < CLIP_VAL) {
-        return noIntersection;
-    }
-
-    vec3 intersect = point + direction * term;
-    return Intersect(true, term, intersect, triangle.color, triangle.normal, vec3(0.0f));
-}
-
-Intersect findClosestIntersect(vec3 point, vec3 direction) {
-    Intersect closestIntersect = Intersect(false, 0.0f, vec3(0.0f), vec3(0.0f), vec3(0.0f), vec3(0.0f));
-    float closestDistance = 1e20f;
-
-    for(int i = 0; i < TRIANGLE_COUNT; i++) {
-        Triangle triangle;
-        triangle.vertex1 = u_Triangles[i * TRIANGLE_VECTORS];
-        triangle.vertex2 = u_Triangles[i * TRIANGLE_VECTORS + 1];
-        triangle.vertex3 = u_Triangles[i * TRIANGLE_VECTORS + 2];
-        triangle.normal = u_Triangles[i * TRIANGLE_VECTORS + 3];
-        triangle.color = u_Triangles[i * TRIANGLE_VECTORS + 4];
-
-        Intersect intersect = calculateRayTriangleIntersect(point, direction, triangle);
-        if(intersect.isExisting && intersect.distance < closestDistance) {
-            closestIntersect = intersect;
-            closestDistance = intersect.distance;
-        }
-    }
-
-    for(int i = 0; i < ELLIPSOID_COUNT; i++) {
-        Ellipsoid ellipsoid;
-        ellipsoid.center = u_Ellipsoids[i * ELLIPSOID_VECTORS];
-        ellipsoid.radius = u_Ellipsoids[i * ELLIPSOID_VECTORS + 1];
-        ellipsoid.color = u_Ellipsoids[i * ELLIPSOID_VECTORS + 2];
-        ellipsoid.material = u_Ellipsoids[i * ELLIPSOID_VECTORS + 3];
-
-        Intersect intersect = calculateRayEllipsoidIntersect(point, direction, ellipsoid);
-        if(intersect.isExisting && intersect.distance < closestDistance) {
-            closestIntersect = intersect;
-            closestDistance = intersect.distance;
-        }
-    }
-
-    return closestIntersect;
-}
-
-QuadResult solveQuad(vec3 quads) {
-    float a = quads.x;
-    float b = quads.y;
-    float c = quads.z;
-
-    // Numerically stable quadratic solve (half-b form).
-    float halfB = 0.5f * b;
-    float discriminant = halfB * halfB - a * c;
-
-    if(discriminant < 0.0f) {
-        return QuadResult(0, vec2(0.0f));
-    }
-
-    float sqrtDiscriminant = sqrt(discriminant);
-
-    // Compute one root using the sign that avoids cancellation
-    // (larger magnitude), then derive the other from it.
-    float q = (halfB > 0.0f)
-        ? -(halfB + sqrtDiscriminant)
-        : -(halfB - sqrtDiscriminant);
-    float term1 = q / a;
-    float term2 = c / q;
-
-    if(term1 < term2) {
-        return QuadResult(2, vec2(term1, term2));
-    } else {
-        return QuadResult(2, vec2(term2, term1));
-    }
 }
 
 vec3 tracePath(vec3 startPoint, vec3 startDirection) {
