@@ -9,7 +9,7 @@ import { vertices, flattenedTriangles, flattenedEllipsoids, light, eye } from ".
 // Issue #25: path tracing is the default mode on startup. This overrides the
 // stale IS_PATHTRACING export in constants.ts (which defaults to false).
 const DEFAULT_PATH_TRACING = true;
-let pathTracingEnabled = DEFAULT_PATH_TRACING;
+const pathTracingEnabled = DEFAULT_PATH_TRACING;
 
 const FRAME_COUNT = 12_000
 
