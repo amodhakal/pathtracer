@@ -238,6 +238,12 @@ vec3 tracePath(vec3 startPoint, vec3 startDirection) {
                 break;
             }
 
+            // Survived Russian roulette: compensate for terminated paths by
+            // dividing by the survival probability so transport stays unbiased.
+            if(depth > 1) {
+                throughput /= P_BOUNCE;
+            }
+
             continue;
         }
 
@@ -258,6 +264,12 @@ vec3 tracePath(vec3 startPoint, vec3 startDirection) {
 
             if(depth > 1 && getRand() < P_BOUNCE) {
                 break;
+            }
+
+            // Survived Russian roulette: compensate for terminated paths by
+            // dividing by the survival probability so transport stays unbiased.
+            if(depth > 1) {
+                throughput /= P_BOUNCE;
             }
 
             if(max(throughput.r, max(throughput.g, throughput.b)) < 0.001f) {
