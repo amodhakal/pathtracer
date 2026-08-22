@@ -43,7 +43,6 @@ uniform float u_FrameCount;
 uniform vec3 u_EnvTop;
 uniform vec3 u_EnvBottom;
 uniform float u_EnvIntensity;
-uniform sampler2D u_NoiseTexture;
 uniform sampler2D u_AccumTexture;
 
 // Issue #57: albedo and normal map texture arrays. Each scene triangle can
@@ -87,6 +86,7 @@ vec3 sampleNormal(vec3 normal, Intersect hit) {
 }
 
 #include <intersection>
+#include <prng>
 
 vec3 tracePath(vec3 startPoint, vec3 startDirection);
 vec3 evaluateEnvironment(vec3 direction);
@@ -98,17 +98,9 @@ float fresnelSchlick(float cosTheta, float ior);
 vec3 calculateReflection(vec3 incident, vec3 faceNormal);
 vec3 calculateRefraction(vec3 incident, vec3 faceNormal, float ior, out bool isTIR);
 
-int randIndex = 0;
-float getRand() {
-    int idx = randIndex++;
-    vec2 pixelCoord = (v_WindowPixels + 1.0) * 0.5;
-    vec2 offsets = vec2(
-        float(idx) * 0.6180339887498949,
-        u_FrameCount * 0.7548776662466927 + float(idx) * 0.2971213928707494
-    );
-    vec2 sampleCoord = fract(pixelCoord + offsets);
-    return texture(u_NoiseTexture, sampleCoord).r;
-}
+// Issue #29: RNG moved into the shader (chunks/prng.glsl). The seed is
+// initialized once per pixel per frame in main() from v_WindowPixels and
+// u_FrameCount; getRand() just advances the PRNG state.
 
 // Issue #9: emitters are identified by material type, never by inspecting
 // the albedo/color — bright diffuse materials must not be misclassified as lights.
@@ -601,6 +593,8 @@ void main() {
     // Issue #21: aspect ratio handled by the shared FOV camera model
     // (see common.glsl). Sub-pixel jitter (issue #12) is applied in NDC,
     // where one screen pixel spans 2/res in both axes.
+    // Issue #29: seed the per-pixel PRNG before the first getRand() call.
+    initRng(v_WindowPixels, u_FrameCount);
     float pixelSize = 2.0f / u_Resolution.y;
     vec2 jitter = (vec2(getRand(), getRand()) - 0.5f) * pixelSize;
 
