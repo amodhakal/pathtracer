@@ -427,9 +427,8 @@ void main() {
 
     // Issue #12: sub-pixel jitter — offset by a random amount within the pixel
     // each frame so averaging over accumulated frames converges to anti-aliasing.
-    // Pixel size in NDC is 2/resolution; pos.x is aspect-scaled, so scale x accordingly.
-    vec2 pixelSize = 2.0f / u_Resolution;
-    pixelSize.x *= u_Resolution.x / u_Resolution.y;
+    // After aspect-scaling pos.x, one screen pixel spans 1/res.y in both axes.
+    float pixelSize = 2.0f / u_Resolution.y;
     vec2 jitter = (vec2(getRand(), getRand()) - 0.5f) * pixelSize;
 
     vec3 rayOrigin = u_Eye;
