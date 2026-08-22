@@ -19,12 +19,9 @@ uniform vec2 u_Resolution;
 #include <intersection>
 
 void main() {
-    vec2 pos = v_WindowPixels.xy;
-    pos.x *= u_Resolution.x / u_Resolution.y;
-
+    // Issue #21: aspect ratio handled by the shared FOV camera model.
     vec3 rayOrigin = u_Eye;
-    vec3 targetPoint = vec3((pos.xy + 1.0f) * 0.5f, 0.0f);
-    vec3 rayDirection = normalize(targetPoint - rayOrigin);
+    vec3 rayDirection = generateCameraRay(v_WindowPixels.xy, u_Resolution, u_Eye);
 
     Intersect hit = findClosestIntersect(rayOrigin, rayDirection);
 

@@ -598,18 +598,14 @@ vec3 tracePath(vec3 startPoint, vec3 startDirection) {
 }
 
 void main() {
-    vec2 pos = v_WindowPixels.xy;
-    pos.x *= u_Resolution.x / u_Resolution.y;
-
-    // Issue #12: sub-pixel jitter — offset by a random amount within the pixel
-    // each frame so averaging over accumulated frames converges to anti-aliasing.
-    // After aspect-scaling pos.x, one screen pixel spans 1/res.y in both axes.
+    // Issue #21: aspect ratio handled by the shared FOV camera model
+    // (see common.glsl). Sub-pixel jitter (issue #12) is applied in NDC,
+    // where one screen pixel spans 2/res in both axes.
     float pixelSize = 2.0f / u_Resolution.y;
     vec2 jitter = (vec2(getRand(), getRand()) - 0.5f) * pixelSize;
 
     vec3 rayOrigin = u_Eye;
-    vec3 targetPoint = vec3((pos.xy + jitter + 1.0f) * 0.5f, 0.0f);
-    vec3 rayDirection = normalize(targetPoint - rayOrigin);
+    vec3 rayDirection = generateCameraRay(v_WindowPixels.xy + jitter, u_Resolution, u_Eye);
 
     vec3 sampleColor = tracePath(rayOrigin, rayDirection);
 
