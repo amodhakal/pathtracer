@@ -12,6 +12,11 @@ precision highp float;
 #define CLIP_VAL 0.00001
 #define SHADOW_CLIP 0.001
 
+// Material encoding packed as vec3(x = material type, y = IOR, z = opacity)
+#define MATERIAL_DIFFUSE 0
+#define MATERIAL_MIRROR 1
+#define MATERIAL_GLASS 2
+
 struct Light {
     vec3 position;
     vec3 color;
@@ -357,7 +362,7 @@ vec3 tracePath(vec3 startPoint, vec3 startDirection) {
 
         int materialType = int(hit.material.x + 0.5f);
 
-        if(materialType == 1) {
+        if(materialType == MATERIAL_MIRROR) {
             direction = calculateReflection(direction, hit.normal);
             point = hit.intersect + hit.normal * CLIP_VAL;
             throughput *= hit.color;
@@ -369,7 +374,7 @@ vec3 tracePath(vec3 startPoint, vec3 startDirection) {
             continue;
         }
 
-        if(materialType == 2) {
+        if(materialType == MATERIAL_GLASS) {
             float opacity = hit.material.z;
 
             if(getRand() >= opacity) {

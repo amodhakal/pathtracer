@@ -1,5 +1,15 @@
 export const IS_PATHTRACING = false;
 
+// Material encoding packed as vec3(x = material type, y = index of refraction, z = opacity)
+export const MATERIAL_DIFFUSE = 0;
+export const MATERIAL_MIRROR = 1;
+export const MATERIAL_GLASS = 2;
+
+export const DEFAULT_IOR = 1.0;
+export const DEFAULT_OPACITY = 0.0;
+export const GLASS_IOR = 1.33;
+export const GLASS_OPACITY = 0.05;
+
 const triangles = [
   {
     vertex1: new Float32Array([0.0, 0.0, -1.0]),
@@ -112,19 +122,19 @@ const ellipsoids = [
     position: new Float32Array([0.5, 0.5, 0.5]),
     radius: new Float32Array([0.2, 0.2, 0.2]),
     color: new Float32Array([1.0, 0.8, 0.0]),
-    material: new Float32Array([0.0, 0.0, 0.0]),
+    material: new Float32Array([MATERIAL_DIFFUSE, DEFAULT_IOR, DEFAULT_OPACITY]),
   },
   {
     position: new Float32Array([0.3, 0.3, 0.3]),
     radius: new Float32Array([0.1, 0.1, 0.1]),
     color: new Float32Array([0.9, 0.9, 0.9]),
-    material: new Float32Array([1.0, 1.0, 0.0]),
+    material: new Float32Array([MATERIAL_MIRROR, DEFAULT_IOR, DEFAULT_OPACITY]),
   },
   {
     position: new Float32Array([0.7, 0.4, 0.0]),
     radius: new Float32Array([0.15, 0.15, 0.15]),
     color: new Float32Array([1.0, 1.0, 1.0]),
-    material: new Float32Array([2.0, 1.33, 0.05]),
+    material: new Float32Array([MATERIAL_GLASS, GLASS_IOR, GLASS_OPACITY]),
   },
 ];
 
