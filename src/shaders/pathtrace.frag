@@ -163,8 +163,20 @@ vec3 calculateDirectIllumination(vec3 point, vec3 normal, vec3 color) {
         }
 
         float ndotl = max(dot(normal, lightDirection), 0.0);
-        float G = ndotl / (1.0f + lightDistance * lightDistance);
-        accumulated += u_Light.color * color * G;
+        float cosLight = max(dot(lightNormal, -lightDirection), 0.0);
+
+        // Area-to-area geometry term for uniform area sampling:
+        // Lo = Le * brdf * cos(theta_i) * cos(theta_l) * V / (r^2 * pdf)
+        // pdf = 1 / lightArea for uniform sampling over the quad.
+        if(ndotl <= 0.0 || cosLight <= 0.0) {
+            continue;
+        }
+
+        float lightArea = 4.0f * u_Light.size.x * u_Light.size.y;
+        float pdf = 1.0f / max(lightArea, CLIP_VAL);
+        float geometryTerm = ndotl * cosLight
+            / max(lightDistance * lightDistance, CLIP_VAL);
+        accumulated += u_Light.color * color * geometryTerm / pdf;
     }
 
     return accumulated / float(LIGHT_SAMPLES);
