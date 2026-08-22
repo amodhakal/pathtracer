@@ -346,15 +346,21 @@ vec3 calculateDirectIllumination(vec3 point, vec3 normal, vec3 color) {
             continue;
         }
 
-        // Area-to-area geometry term for uniform area sampling:
-        // Lo = Le * brdf * cos(theta_i) * cos(theta_l) * V / (r^2 * pdf)
-        // pdf = 1 / lightArea for uniform sampling over the quad.
+        // Issue #31: correct Monte Carlo estimator for uniform area sampling.
+        // The sampler draws points uniformly on the quad, so the sampling pdf
+        // is the area density pdf_A = 1 / lightArea. The geometry term's
+        // cos(theta_l) / r^2 factor is exactly the pdf_A -> pdf_w (solid
+        // angle) measure conversion, giving:
+        //   Lo += Le * f_r * cos(theta_i) * V * G / pdf_A
+        // with the Lambertian BRDF f_r = albedo / PI. (The previous version
+        // used the raw albedo as the BRDF, over-weighting direct light by PI.)
 
         float lightArea = 4.0f * u_Light.size.x * u_Light.size.y;
-        float pdf = 1.0f / max(lightArea, CLIP_VAL);
-        float geometryTerm = ndotl * cosLight
+        float pdfArea = 1.0f / max(lightArea, CLIP_VAL);
+        vec3 brdf = color * (1.0f / 3.14159265f);
+        float solidAngleConversion = cosLight
             / max(lightDistance * lightDistance, CLIP_VAL);
-        accumulated += u_Light.color * color * geometryTerm / pdf;
+        accumulated += u_Light.color * brdf * ndotl * solidAngleConversion / pdfArea;
     }
 
     return accumulated / float(LIGHT_SAMPLES);
