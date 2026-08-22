@@ -295,7 +295,6 @@ try {
         requestAnimationFrame(render);
       } else {
         renderLoopActive = false;
-        console.log(`Rendering complete after ${FRAME_COUNT} frames`);
       }
     } else {
       renderLocal();
