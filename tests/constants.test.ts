@@ -12,7 +12,7 @@ import {
   MATERIAL_THINFILM,
 } from "../src/constants";
 
-const TRIANGLE_VEC_VALUE_COUNT = 15;
+const TRIANGLE_VEC_VALUE_COUNT = 24;
 const ELLIPSOID_VEC_VALUE_COUNT = 12;
 const NUM_TRIANGLES = 14;
 const NUM_ELLIPSOIDS = 7;
