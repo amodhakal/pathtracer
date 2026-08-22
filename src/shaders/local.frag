@@ -12,6 +12,11 @@ precision highp float;
 #define SHININESS 32.0
 #define SPECULAR 0.3
 
+// Material encoding packed as vec3(x = material type, y = IOR, z = opacity)
+#define MATERIAL_DIFFUSE 0
+#define MATERIAL_MIRROR 1
+#define MATERIAL_GLASS 2
+
 struct Light {
     vec3 position;
     vec3 color;
