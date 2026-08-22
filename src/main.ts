@@ -5,8 +5,6 @@ import displayFragCode from "./shaders/display.frag";
 import noiseGenFragCode from "./shaders/noiseGen.frag";
 import { createProgram, createShader } from "./utils";
 import { vertices, flattenedTriangles, flattenedEllipsoids, light } from "./constants";
-import { load } from "@loaders.gl/core";
-import { GLBLoader } from "@loaders.gl/gltf";
 
 // Issue #25: path tracing is the default mode on startup. This overrides the
 // stale IS_PATHTRACING export in constants.ts (which defaults to false).
@@ -14,9 +12,6 @@ const DEFAULT_PATH_TRACING = true;
 let pathTracingEnabled = DEFAULT_PATH_TRACING;
 
 const FRAME_COUNT = 12_000
-
-const gltf = await load("/pathtracer/lion_crushing_a_serpent.glb", GLBLoader);
-console.log(gltf);
 
 const canvas = document.getElementById("canvas") as HTMLCanvasElement;
 const gl = canvas.getContext("webgl2");
