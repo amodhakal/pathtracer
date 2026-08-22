@@ -377,31 +377,27 @@ vec3 tracePath(vec3 startPoint, vec3 startDirection) {
         if(materialType == MATERIAL_GLASS) {
             float opacity = hit.material.z;
 
-            if(getRand() >= opacity) {
-                accumulated += throughput * calculateDirectIllumination(hit.intersect, hit.normal, hit.color);
+            vec3 refracted = calculateRefraction(direction, hit.normal, hit.material.y);
+            vec3 reflected = calculateReflection(direction, hit.normal);
 
-                vec3 refracted = calculateRefraction(direction, hit.normal, hit.material.y);
-                vec3 reflected = calculateReflection(direction, hit.normal);
+            float cosTheta = abs(dot(hit.normal, direction));
+            float fresnel = fresnelSchlick(cosTheta, hit.material.y);
 
-                float cosTheta = abs(dot(hit.normal, direction));
-                float fresnel = fresnelSchlick(cosTheta, hit.material.y);
+            bool isReflecting = refracted == vec3(0.0f) || getRand() < fresnel;
+            direction = isReflecting ? reflected : refracted;
+            vec3 travelSide = dot(direction, hit.normal) < 0.0f ? -hit.normal : hit.normal;
+            point = hit.intersect + travelSide * CLIP_VAL;
+            throughput *= mix(vec3(1.0f), hit.color, opacity);
 
-                bool isReflecting = refracted == vec3(0.0f) || getRand() < fresnel;
-                direction = isReflecting ? reflected : refracted;
-                vec3 travelSide = dot(direction, hit.normal) < 0.0f ? -hit.normal : hit.normal;
-                point = hit.intersect + travelSide * CLIP_VAL;
-                throughput *= mix(vec3(1.0f), hit.color, opacity);
-
-                if(depth > 1 && getRand() < P_BOUNCE) {
-                    break;
-                }
-
-                if(max(throughput.r, max(throughput.g, throughput.b)) < 0.001f) {
-                    break;
-                }
-
-                continue;
+            if(depth > 1 && getRand() < P_BOUNCE) {
+                break;
             }
+
+            if(max(throughput.r, max(throughput.g, throughput.b)) < 0.001f) {
+                break;
+            }
+
+            continue;
         }
 
         accumulated += throughput * calculateDirectIllumination(hit.intersect, hit.normal, hit.color);
