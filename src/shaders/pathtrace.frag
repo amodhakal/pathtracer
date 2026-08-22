@@ -91,7 +91,7 @@ vec3 evaluateEnvironment(vec3 direction);
 vec3 sampleEnvironmentIllumination(vec3 point, vec3 normal, vec3 albedo);
 vec3 calculateDirectIllumination(vec3 point, vec3 normal, vec3 color);
 vec3 sampleBounceDirection(vec3 normal);
-bool isEmitter(float r, float g, float b);
+bool isEmitter(vec3 material);
 float fresnelSchlick(float cosTheta, float ior);
 vec3 calculateReflection(vec3 incident, vec3 faceNormal);
 vec3 calculateRefraction(vec3 incident, vec3 faceNormal, float ior, out bool isTIR);
@@ -108,8 +108,10 @@ float getRand() {
     return texture(u_NoiseTexture, sampleCoord).r;
 }
 
-bool isEmitter(float r, float g, float b) {
-    return r > 1.0f || g > 1.0f || b > 1.0f;
+// Issue #9: emitters are identified by material type, never by inspecting
+// the albedo/color — bright diffuse materials must not be misclassified as lights.
+bool isEmitter(vec3 material) {
+    return int(material.x + 0.5f) == MATERIAL_EMISSIVE;
 }
 
 float fresnelSchlick(float cosTheta, float ior) {
@@ -406,7 +408,7 @@ vec3 tracePath(vec3 startPoint, vec3 startDirection) {
         hit.color = sampleAlbedo(hit.color, hit);
         hit.normal = sampleNormal(hit.normal, hit);
 
-        if(isEmitter(hit.color.r, hit.color.g, hit.color.b)) {
+        if(isEmitter(hit.material)) {
             accumulated += throughput * hit.color;
             break;
         }
