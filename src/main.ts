@@ -13,22 +13,40 @@ let pathTracingEnabled = DEFAULT_PATH_TRACING;
 
 const FRAME_COUNT = 12_000
 
+// Issue #19: non-blocking error reporting — show errors in an on-page overlay
+// (and console.error) instead of alert(), which blocks the main thread.
+function reportError(message: string): void {
+  console.error(message);
+  let overlay = document.getElementById("error-overlay");
+  if (!overlay) {
+    overlay = document.createElement("div");
+    overlay.id = "error-overlay";
+    overlay.setAttribute("role", "alert");
+    overlay.style.cssText =
+      "position:fixed;top:0;left:0;right:0;z-index:9999;" +
+      "background:#c0392b;color:#fff;font:14px/1.4 sans-serif;" +
+      "padding:12px 16px;white-space:pre-wrap;";
+    document.body.appendChild(overlay);
+  }
+  overlay.textContent = overlay.textContent ? overlay.textContent + "\n" + message : message;
+}
+
 const canvasElement = document.getElementById("canvas");
 if (!(canvasElement instanceof HTMLCanvasElement)) {
   const message = "Could not find #canvas element in the document.";
-  alert(message);
+  reportError(message);
   throw new Error(message);
 }
 const canvas: HTMLCanvasElement = canvasElement;
 const gl = canvas.getContext("webgl2");
 if (!gl) {
-  alert("WebGL2 not supported");
+  reportError("WebGL2 not supported");
   throw new Error("WebGL2 not supported");
 }
 
 const floatExt = gl.getExtension("EXT_color_buffer_float");
 if (!floatExt) {
-  alert("Floating-point color buffers are not supported on this device.");
+  reportError("Floating-point color buffers are not supported on this device.");
   throw new Error("EXT_color_buffer_float not supported");
 }
 
@@ -356,6 +374,5 @@ try {
   new ResizeObserver(resizeCanvas).observe(canvas);
   startRenderLoop();
 } catch (err) {
-  console.error("Error: ", err);
-  alert("Error: " + err);
+  reportError("Error: " + err);
 }
