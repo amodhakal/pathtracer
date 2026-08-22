@@ -187,8 +187,8 @@ vec3 sampleBounceDirection(vec3 normal) {
     vec3 tangent = normalize(cross(basis, normal));
     vec3 bitangent = cross(normal, tangent);
 
-    const int MAX_ITERS = 64;
-    vec3 result = normal;
+    const int MAX_ITERS = 32;
+    vec3 result = normalize(tangent + bitangent + normal);
     for(int i = 0; i < MAX_ITERS; i++) {
         float x = getRand() * 2.0f - 1.0f;
         float y = getRand() * 2.0f - 1.0f;
