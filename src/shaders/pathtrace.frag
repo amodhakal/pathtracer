@@ -46,6 +46,9 @@ uniform vec3 u_CamUp;
 uniform Light u_Light;
 uniform vec3 u_Ellipsoids[ELLIPSOID_COUNT * ELLIPSOID_VECTORS];
 uniform vec3 u_Triangles[TRIANGLE_COUNT * TRIANGLE_VECTORS];
+// Issue #47: BVH acceleration structure.
+uniform vec3 u_BvhNodes[BVH_NODE_COUNT * BVH_NODE_SLOTS];
+uniform vec3 u_BvhPrimIndices[PRIMITIVE_COUNT];
 uniform vec2 u_Resolution;
 uniform float u_FrameCount;
 uniform vec3 u_EnvTop;
@@ -99,6 +102,7 @@ vec3 sampleNormal(vec3 normal, Intersect hit) {
 }
 
 #include <intersection>
+#include <bvh>
 #include <prng>
 
 vec3 tracePath(vec3 startPoint, vec3 startDirection);
@@ -418,39 +422,8 @@ vec3 calculateDirectIllumination(vec3 point, vec3 normal, vec3 color) {
             continue;
         }
 
-        // Issue #49: occlusion-only any-hit queries instead of full closest-
-        // hit intersects. Each test skips normal/point/color construction and
-        // the loop exits on the first blocker found. Works with or without a
-        // BVH (issue #47) — a BVH traversal can replace the linear loops
-        // without changing these call sites.
-        bool occluded = false;
-
-        for(int i = 0; i < ELLIPSOID_COUNT && !occluded; i++) {
-            Ellipsoid ellipsoid;
-            ellipsoid.center = u_Ellipsoids[i * ELLIPSOID_VECTORS];
-            ellipsoid.radius = u_Ellipsoids[i * ELLIPSOID_VECTORS + 1];
-            ellipsoid.color = u_Ellipsoids[i * ELLIPSOID_VECTORS + 2];
-            ellipsoid.material = u_Ellipsoids[i * ELLIPSOID_VECTORS + 3];
-
-            occluded = rayEllipsoidOccluded(shadowRayOrigin, lightDirection, lightDistance - SHADOW_CLIP, ellipsoid);
-        }
-
-        for(int i = 0; i < TRIANGLE_COUNT && !occluded; i++) {
-            Triangle triangle;
-            triangle.vertex1 = u_Triangles[i * TRIANGLE_VECTORS];
-            triangle.vertex2 = u_Triangles[i * TRIANGLE_VECTORS + 1];
-            triangle.vertex3 = u_Triangles[i * TRIANGLE_VECTORS + 2];
-            triangle.normal = u_Triangles[i * TRIANGLE_VECTORS + 3];
-            triangle.color = u_Triangles[i * TRIANGLE_VECTORS + 4];
-            // Issue #57: UV/texture slots are irrelevant for occlusion tests
-            // but must be populated to satisfy the struct layout.
-            triangle.uv1 = u_Triangles[i * TRIANGLE_VECTORS + 5].xy;
-            triangle.uv2 = u_Triangles[i * TRIANGLE_VECTORS + 5].zw;
-            triangle.uv3 = u_Triangles[i * TRIANGLE_VECTORS + 6].xy;
-            triangle.textures = u_Triangles[i * TRIANGLE_VECTORS + 6].zw;
-
-            occluded = rayTriangleOccluded(shadowRayOrigin, lightDirection, lightDistance - SHADOW_CLIP, triangle);
-        }
+        // Issue #49/#47: occlusion-only any-hit query via BVH traversal.
+        bool occluded = bvhAnyHit(shadowRayOrigin, lightDirection, lightDistance - SHADOW_CLIP);
 
         if(occluded) {
             continue;
