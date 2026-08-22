@@ -203,11 +203,10 @@ try {
     gl.enableVertexAttribArray(posLocNoise);
     gl.vertexAttribPointer(posLocNoise, 2, gl.FLOAT, false, 0, 0);
 
-    // Issue #4: fixed seed so the noise texture (and therefore the render) is
-    // reproducible frame-to-frame and across runs. Previously this used
-    // Math.random(), making each run nondeterministic.
+    // Issue #4 / #96: deterministic per-run seed that varies per accumulated
+    // frame so Monte-Carlo samples decorrelate while runs stay reproducible.
     const FIXED_NOISE_SEED = 19700101.0;
-    gl.uniform1f(noiseUniforms.u_Seed, FIXED_NOISE_SEED);
+    gl.uniform1f(noiseUniforms.u_Seed, FIXED_NOISE_SEED + frameCount);
     gl.uniform2f(noiseUniforms.u_Resolution, textureWidth, textureHeight);
 
     gl.drawArrays(gl.TRIANGLES, 0, 6);
