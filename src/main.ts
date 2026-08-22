@@ -4,7 +4,7 @@ import localFragCode from "./shaders/local.frag";
 import displayFragCode from "./shaders/display.frag";
 import noiseGenFragCode from "./shaders/noiseGen.frag";
 import { createProgram, createShader } from "./utils";
-import { vertices, flattenedTriangles, flattenedEllipsoids, light } from "./constants";
+import { vertices, flattenedTriangles, flattenedEllipsoids, light, eye } from "./constants";
 
 // Issue #25: path tracing is the default mode on startup. This overrides the
 // stale IS_PATHTRACING export in constants.ts (which defaults to false).
@@ -232,7 +232,7 @@ try {
     gl.bindTexture(gl.TEXTURE_2D, readTex);
     gl.uniform1i(pathtraceUniforms.u_AccumTexture, 1);
 
-    gl.uniform3fv(pathtraceUniforms.u_Eye, new Float32Array([0.5, 0.5, -0.4]));
+    gl.uniform3fv(pathtraceUniforms.u_Eye, eye);
     gl.uniform3fv(pathtraceUniforms.u_Light.position, light.position);
     gl.uniform3fv(pathtraceUniforms.u_Light.color, light.color);
     gl.uniform3fv(pathtraceUniforms.u_Light.normal, light.normal);
@@ -271,7 +271,7 @@ try {
     gl.enableVertexAttribArray(posLocLocal);
     gl.vertexAttribPointer(posLocLocal, 2, gl.FLOAT, false, 0, 0);
 
-    gl.uniform3fv(localUniforms.u_Eye, new Float32Array([0.5, 0.5, -0.4]));
+    gl.uniform3fv(localUniforms.u_Eye, eye);
     gl.uniform3fv(localUniforms.u_Light.position, light.position);
     gl.uniform3fv(localUniforms.u_Light.color, light.color);
     gl.uniform3fv(localUniforms.u_Light.normal, light.normal);
