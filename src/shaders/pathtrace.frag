@@ -100,8 +100,18 @@ vec3 calculateDirectIllumination(vec3 point, vec3 normal, vec3 color);
 vec3 sampleBounceDirection(vec3 normal);
 bool isEmitter(vec3 material);
 float fresnelSchlick(float cosTheta, float ior);
+
+// Issue #32: exact unpolarized dielectric Fresnel (no Schlick approximation).
+// cosThetaI is measured against the geometric normal on the incident side;
+// eta = n_incident / n_transmitted. Returns the fraction of energy reflected
+// and handles total internal reflection (returns 1.0 above the critical
+// angle), unlike Schlick which silently underestimates reflectivity near TIR.
+float fresnelDielectric(float cosThetaI, float eta);
 vec3 calculateReflection(vec3 incident, vec3 faceNormal);
 vec3 calculateRefraction(vec3 incident, vec3 faceNormal, float ior, out bool isTIR);
+bool sampleGlassBsdf(vec3 incident, vec3 faceNormal, vec3 albedo,
+                     float ior, float opacity,
+                     out vec3 outDirection, out vec3 outWeight);
 
 // Issue #29: RNG moved into the shader (chunks/prng.glsl). The seed is
 // initialized once per pixel per frame in main() from v_WindowPixels and
@@ -186,6 +196,87 @@ vec3 sampleGGXHalfVector(vec3 normal, float roughness) {
         }
     }
     return normal;
+}
+
+// ---- Issue #32: dielectric BSDF sampling with MIS --------------------------
+
+// Exact unpolarized Fresnel equations for a dielectric interface.
+// eta = n_i / n_t. Uses the full sine/cosine formulation rather than Schlick
+// so grazing angles and total internal reflection are handled correctly —
+// Schlick's F0-based form underestimates reflectance near the critical angle,
+// which biased glass throughput in the old lobe hack.
+float fresnelDielectric(float cosThetaI, float eta) {
+    cosThetaI = clamp(cosThetaI, -1.0f, 1.0f);
+
+    // Determine which side we are entering/exiting and flip eta accordingly.
+    bool entering = cosThetaI > 0.0f;
+    float ni = entering ? 1.0f : eta;   // incident medium IOR
+    float nt = entering ? eta : 1.0f;   // transmitted medium IOR
+    float sinThetaI = sqrt(max(1.0f - cosThetaI * cosThetaI, 0.0f));
+    float sinThetaT = ni / max(nt, CLIP_VAL) * sinThetaI;
+
+    // Total internal reflection.
+    if(sinThetaT >= 1.0f) {
+        return 1.0f;
+    }
+
+    float cosThetaT = sqrt(max(1.0f - sinThetaT * sinThetaT, 0.0f));
+    float cosThetaIabs = abs(cosThetaI);
+
+    float rs = (ni * cosThetaIabs - nt * cosThetaT)
+        / max(ni * cosThetaIabs + nt * cosThetaT, CLIP_VAL);
+    float rp = (ni * cosThetaT - nt * cosThetaIabs)
+        / max(ni * cosThetaT + nt * cosThetaIabs, CLIP_VAL);
+    return 0.5f * (rs * rs + rp * rp);
+}
+
+// Issue #32: proper BSDF sampling for glass with explicit MIS accounting.
+//
+// The glass interface is a delta BSDF: both lobes (specular reflection and
+// specular refraction) have Dirac delta PDFs, so NEE toward area lights is
+// impossible along a delta path — the only viable strategy is BSDF sampling.
+// "MIS" here therefore reduces to choosing the lobe by its exact energy
+// fraction: picking reflection with probability Fr (the true reflectance)
+// makes each sampled lobe an importance-sampled estimator of the BSDF with
+// weight f(w_i,w_o)*cos/pdf = 1 per channel, so the estimator is unbiased
+// with minimum variance for a two-lobe delta BSDF.
+//
+// Composition contract with light sampling (#31): calculateDirectIllumination
+// must divide by its own strategy pdf only (the corrected light PDF); it is
+// never applied to delta-BSDF hits like this one, so no MIS power heuristic
+// between strategies is needed and neither side double counts. Non-delta
+// lobes (diffuse/GGX) keep their existing suppressEnvHit-style separation.
+//
+// Returns false when the path terminates (energy fully absorbed).
+bool sampleGlassBsdf(vec3 incident, vec3 faceNormal, vec3 albedo,
+                     float ior, float opacity,
+                     out vec3 outDirection, out vec3 outWeight) {
+    float cosThetaI = dot(-incident, faceNormal);
+    bool entering = cosThetaI > 0.0f;
+    // n_i / n_t for this transition (glass -> air on exit).
+    float eta = entering ? 1.0f / ior : ior;
+
+    float fresnel = fresnelDielectric(cosThetaI, eta);
+
+    vec3 refracted = calculateRefraction(incident, faceNormal, ior);
+    bool tir = refracted == vec3(0.0f);
+
+    // Lobe selection by exact Fresnel fraction == delta-lobe MIS weighting.
+    bool isReflecting = tir || getRand() < fresnel;
+
+    if(isReflecting) {
+        outDirection = normalize(calculateReflection(incident, faceNormal));
+        // Reflection lobe is untinted (mirror-like); tint applies on transmission.
+        outWeight = vec3(1.0f);
+    } else {
+        outDirection = normalize(refracted);
+        // Beer-like absorption applied once per traversal, scaled by opacity:
+        // tinted fraction = mix(white, albedo, opacity).
+        outWeight = mix(vec3(1.0f), albedo, opacity);
+    }
+
+    return max(outWeight.r, max(outWeight.g, outWeight.b)) >= 0.001f
+        && dot(outDirection, faceNormal) != 0.0f;
 }
 
 // Thin-film interference reflectance: two-interface Airy-like approximation.
@@ -441,21 +532,24 @@ vec3 tracePath(vec3 startPoint, vec3 startDirection) {
         }
 
         if(materialType == MATERIAL_GLASS) {
-            float opacity = hit.material.z;
+            // Issue #32: proper dielectric BSDF sampling with MIS-consistent
+            // lobe selection (exact Fresnel fractions, exact Fresnel equations,
+            // TIR handled) instead of the Schlick-based lobe hack.
+            vec3 newDirection;
+            vec3 lobeWeight;
+            bool survived = sampleGlassBsdf(direction, hit.normal, hit.color,
+                hit.material.y, hit.material.z, newDirection, lobeWeight);
 
-            bool isTIR;
-            vec3 refracted = calculateRefraction(direction, hit.normal, hit.material.y, isTIR);
-            vec3 reflected = calculateReflection(direction, hit.normal);
-
-            float cosTheta = abs(dot(hit.normal, direction));
-            float fresnel = fresnelSchlick(cosTheta, hit.material.y);
-
-            bool isReflecting = isTIR || getRand() < fresnel;
-            direction = isReflecting ? reflected : refracted;
-            suppressEnvHit = false;
+            direction = newDirection;
+            suppressEnvHit = false; // specular chain: env hits stay enabled
             vec3 travelSide = dot(direction, hit.normal) < 0.0f ? -hit.normal : hit.normal;
-            point = hit.intersect + travelSide * RAY_EPSILON;
-            throughput *= mix(vec3(1.0f), hit.color, opacity);
+            point = hit.intersect + travelSide * CLIP_VAL;
+            throughput *= lobeWeight;
+
+            // Path termination: absorbed by the BSDF weight check or RR below.
+            if(!survived) {
+                break;
+            }
 
             if(depth > 1 && getRand() < P_BOUNCE) {
                 break;

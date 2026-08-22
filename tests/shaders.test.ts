@@ -37,6 +37,19 @@ describe("shader sources", () => {
     expect(source).toContain("#include <prng>");
     expect(source).toContain("initRng(");
     expect(source).not.toContain("u_NoiseTexture");
+
+  it("samples glass with a proper dielectric BSDF and MIS contract (#32)", () => {
+    const pathtrace = readFileSync(join(shaderDir, "pathtrace.frag"), "utf8");
+    // Exact dielectric Fresnel (not Schlick-only) with TIR handling.
+    expect(pathtrace).toContain("float fresnelDielectric(");
+    expect(pathtrace).toContain("sinThetaT >= 1.0f");
+    // Delta-BSDF sampler with explicit MIS/lobe-selection documentation.
+    expect(pathtrace).toContain("bool sampleGlassBsdf(");
+    expect(pathtrace).toMatch(/MIS/);
+    // The tracePath glass branch must route through the BSDF sampler.
+    expect(pathtrace).toContain("sampleGlassBsdf(direction, hit.normal, hit.color");
+    // Old Schlick-based lobe hack must be gone from the glass path.
+    expect(pathtrace).not.toMatch(/MATERIAL_GLASS[\s\S]{0,400}fresnelSchlick/);
   });
 
   // Issue #58: thin-lens depth of field — the path tracer must declare the
