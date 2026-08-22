@@ -5,47 +5,98 @@
 // NOTE: forward declarations needed because these functions are defined
 // below their first call sites (regression from the #37 chunk extraction).
 QuadResult solveQuad(vec3 quads);
+Triangle triangleAt(int i);
+Ellipsoid ellipsoidAt(int i);
+bool ellipsoidHitDistance(vec3 point, vec3 direction, Ellipsoid ellipsoid, float maxDistance, out float outDistance);
+bool triangleHitDistance(vec3 point, vec3 direction, Triangle triangle, float maxDistance, out float outDistance);
 Intersect calculateRayEllipsoidIntersect(vec3 point, vec3 direction, Ellipsoid ellipsoid);
 Intersect calculateRayTriangleIntersect(vec3 point, vec3 direction, Triangle triangle);
 
 // Issue #60 fix: findClosestIntersect was dropped during the #37 chunk
-// extraction; restored here (uses u_Triangles/u_Ellipsoids declared by the
-// importing fragment shader before this include).
-Intersect findClosestIntersect(vec3 point, vec3 direction) {
-    Intersect closestIntersect = Intersect(false, 0.0f, vec3(0.0f), vec3(0.0f), vec3(0.0f), vec3(0.0f));
-    float closestDistance = 1e20f;
-
-    for(int i = 0; i < TRIANGLE_COUNT; i++) {
-        Triangle triangle;
-        triangle.vertex1 = u_Triangles[i * TRIANGLE_VECTORS];
-        triangle.vertex2 = u_Triangles[i * TRIANGLE_VECTORS + 1];
-        triangle.vertex3 = u_Triangles[i * TRIANGLE_VECTORS + 2];
-        triangle.normal = u_Triangles[i * TRIANGLE_VECTORS + 3];
-        triangle.color = u_Triangles[i * TRIANGLE_VECTORS + 4];
-
-        Intersect intersect = calculateRayTriangleIntersect(point, direction, triangle);
-        if(intersect.isExisting && intersect.distance < closestDistance) {
-            closestIntersect = intersect;
-            closestDistance = intersect.distance;
-        }
-    }
-
-    for(int i = 0; i < ELLIPSOID_COUNT; i++) {
-        Ellipsoid ellipsoid;
-        ellipsoid.center = u_Ellipsoids[i * ELLIPSOID_VECTORS];
-        ellipsoid.radius = u_Ellipsoids[i * ELLIPSOID_VECTORS + 1];
-        ellipsoid.color = u_Ellipsoids[i * ELLIPSOID_VECTORS + 2];
-        ellipsoid.material = u_Ellipsoids[i * ELLIPSOID_VECTORS + 3];
-
-        Intersect intersect = calculateRayEllipsoidIntersect(point, direction, ellipsoid);
-        if(intersect.isExisting && intersect.distance < closestDistance) {
-            closestIntersect = intersect;
-            closestDistance = intersect.distance;
-        }
-    }
-
-    return closestIntersect;
+// extraction; restored here. Issue #47: now BVH-accelerated — traversal in
+// <bvh> narrows to one primitive, which is then fully intersected.
+Triangle triangleAt(int i) {
+    Triangle triangle;
+    triangle.vertex1 = u_Triangles[i * TRIANGLE_VECTORS];
+    triangle.vertex2 = u_Triangles[i * TRIANGLE_VECTORS + 1];
+    triangle.vertex3 = u_Triangles[i * TRIANGLE_VECTORS + 2];
+    triangle.normal = u_Triangles[i * TRIANGLE_VECTORS + 3];
+    triangle.color = u_Triangles[i * TRIANGLE_VECTORS + 4];
+    // Issue #57: two packed UV slots and one packed texture-id slot.
+    triangle.uv1 = u_Triangles[i * TRIANGLE_VECTORS + 5].xy;
+    triangle.uv2 = u_Triangles[i * TRIANGLE_VECTORS + 5].zw;
+    triangle.uv3 = u_Triangles[i * TRIANGLE_VECTORS + 6].xy;
+    triangle.textures = u_Triangles[i * TRIANGLE_VECTORS + 6].zw;
+    return triangle;
 }
+
+Ellipsoid ellipsoidAt(int i) {
+    Ellipsoid ellipsoid;
+    ellipsoid.center = u_Ellipsoids[i * ELLIPSOID_VECTORS];
+    ellipsoid.radius = u_Ellipsoids[i * ELLIPSOID_VECTORS + 1];
+    ellipsoid.color = u_Ellipsoids[i * ELLIPSOID_VECTORS + 2];
+    ellipsoid.material = u_Ellipsoids[i * ELLIPSOID_VECTORS + 3];
+    return ellipsoid;
+}
+
+// Distance-only variants used by the BVH closest-hit traversal. These mirror
+// the full intersect routines' acceptance conditions exactly, so BVH results
+// match brute force bit-for-bit modulo float associativity.
+bool ellipsoidHitDistance(vec3 point, vec3 direction, Ellipsoid ellipsoid, float maxDistance, out float outDistance) {
+    vec3 firstResult = direction / ellipsoid.radius;
+    vec3 secondResult = point - ellipsoid.center;
+    vec3 thirdResult = secondResult / ellipsoid.radius;
+
+    QuadResult result = solveQuad(vec3(
+        dot(firstResult, firstResult),
+        2.0f * dot(firstResult, thirdResult),
+        dot(thirdResult, thirdResult) - 1.0f
+    ));
+
+    for(int idx = 0; idx < MAX_TERM_COUNT; idx++) {
+        if(idx >= result.termCount) {
+            break;
+        }
+        float term = result.terms[idx];
+        if(term >= CLIP_VAL && term < maxDistance) {
+            outDistance = term;
+            return true;
+        }
+    }
+    return false;
+}
+
+bool triangleHitDistance(vec3 point, vec3 direction, Triangle triangle, float maxDistance, out float outDistance) {
+    vec3 edge1 = triangle.vertex2 - triangle.vertex1;
+    vec3 edge2 = triangle.vertex3 - triangle.vertex1;
+
+    vec3 orthogonal = cross(direction, edge2);
+    float determinant = dot(edge1, orthogonal);
+    if(abs(determinant) < CLIP_VAL) {
+        return false;
+    }
+
+    float inverseDeterminant = 1.0f / determinant;
+    vec3 pointToVertex = point - triangle.vertex1;
+    float uValue = dot(pointToVertex, orthogonal) * inverseDeterminant;
+    if(uValue < 0.0f || uValue > 1.0f) {
+        return false;
+    }
+
+    vec3 crossVector = cross(pointToVertex, edge1);
+    float vValue = dot(direction, crossVector) * inverseDeterminant;
+    if(vValue < 0.0f || uValue + vValue > 1.0f) {
+        return false;
+    }
+
+    float term = dot(edge2, crossVector) * inverseDeterminant;
+    if(term < CLIP_VAL || term >= maxDistance) {
+        return false;
+    }
+    outDistance = term;
+    return true;
+}
+
 
 Intersect calculateRayEllipsoidIntersect(vec3 point, vec3 direction, Ellipsoid ellipsoid) {
     vec3 firstResult = direction / ellipsoid.radius;
@@ -128,46 +179,24 @@ Intersect calculateRayTriangleIntersect(vec3 point, vec3 direction, Triangle tri
 
 // Restores findClosestIntersect, which was dropped from this chunk during the
 // issue #37 refactor but is still called by pathtrace.frag and local.frag.
+// Issue #47: BVH traversal replaces the brute-force primitive loops. The
+// <bvh> chunk must be included AFTER this chunk (it calls the helpers above)
+// and the importing shader declares u_BvhNodes / u_BvhPrimIndices.
+BvhHit bvhClosestPrimitive(vec3 point, vec3 direction);
+
 Intersect findClosestIntersect(vec3 point, vec3 direction) {
-    Intersect closestIntersect = Intersect(false, 0.0f, vec3(0.0f), vec3(0.0f),
-        vec3(0.0f), vec3(0.0f), vec2(0.0f), vec2(-1.0f));
-    float closestDistance = 1e20f;
+    BvhHit bvhHit = bvhClosestPrimitive(point, direction);
 
-    for(int i = 0; i < TRIANGLE_COUNT; i++) {
-        Triangle triangle;
-        triangle.vertex1 = u_Triangles[i * TRIANGLE_VECTORS];
-        triangle.vertex2 = u_Triangles[i * TRIANGLE_VECTORS + 1];
-        triangle.vertex3 = u_Triangles[i * TRIANGLE_VECTORS + 2];
-        triangle.normal = u_Triangles[i * TRIANGLE_VECTORS + 3];
-        triangle.color = u_Triangles[i * TRIANGLE_VECTORS + 4];
-        // Issue #57: two packed UV slots and one packed texture-id slot.
-        triangle.uv1 = u_Triangles[i * TRIANGLE_VECTORS + 5].xy;
-        triangle.uv2 = u_Triangles[i * TRIANGLE_VECTORS + 5].zw;
-        triangle.uv3 = u_Triangles[i * TRIANGLE_VECTORS + 6].xy;
-        triangle.textures = u_Triangles[i * TRIANGLE_VECTORS + 6].zw;
-
-        Intersect intersect = calculateRayTriangleIntersect(point, direction, triangle);
-        if(intersect.isExisting && intersect.distance < closestDistance) {
-            closestIntersect = intersect;
-            closestDistance = intersect.distance;
-        }
+    if(!bvhHit.isExisting || bvhHit.primIndex < 0) {
+        return Intersect(false, 0.0f, vec3(0.0f), vec3(0.0f),
+            vec3(0.0f), vec3(0.0f), vec2(0.0f), vec2(-1.0f));
     }
 
-    for(int i = 0; i < ELLIPSOID_COUNT; i++) {
-        Ellipsoid ellipsoid;
-        ellipsoid.center = u_Ellipsoids[i * ELLIPSOID_VECTORS];
-        ellipsoid.radius = u_Ellipsoids[i * ELLIPSOID_VECTORS + 1];
-        ellipsoid.color = u_Ellipsoids[i * ELLIPSOID_VECTORS + 2];
-        ellipsoid.material = u_Ellipsoids[i * ELLIPSOID_VECTORS + 3];
-
-        Intersect intersect = calculateRayEllipsoidIntersect(point, direction, ellipsoid);
-        if(intersect.isExisting && intersect.distance < closestDistance) {
-            closestIntersect = intersect;
-            closestDistance = intersect.distance;
-        }
+    if(bvhHit.isTriangle) {
+        return calculateRayTriangleIntersect(point, direction, triangleAt(bvhHit.primIndex));
     }
-
-    return closestIntersect;
+    return calculateRayEllipsoidIntersect(point, direction,
+        ellipsoidAt(bvhHit.primIndex - TRIANGLE_COUNT));
 }
 
 // Issue #49: occlusion-only ("any-hit") variants for shadow rays. Shadow

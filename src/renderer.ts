@@ -11,6 +11,8 @@ import {
   APERTURE_RADIUS,
   FOCAL_DISTANCE,
 } from "./constants";
+// Issue #47: BVH acceleration structure uniforms.
+import { flattenedBvhNodes, flattenedBvhPrimIndices } from "./bvh";
 import type { Programs } from "./programs";
 import type { QuadGeometry } from "./geometry";
 import { createRenderTargets, destroyRenderTargets, type RenderTargets } from "./framebuffers";
@@ -79,6 +81,8 @@ export class Renderer {
       u_Light: getLightUniforms(gl, programs.pathtrace),
       u_Ellipsoids: gl.getUniformLocation(programs.pathtrace, "u_Ellipsoids")!,
       u_Triangles: gl.getUniformLocation(programs.pathtrace, "u_Triangles")!,
+      u_BvhNodes: gl.getUniformLocation(programs.pathtrace, "u_BvhNodes")!,
+      u_BvhPrimIndices: gl.getUniformLocation(programs.pathtrace, "u_BvhPrimIndices")!,
       // NOTE: shader-side u_Time declaration removed in pt/prng-sampling; the TS-side
       // dead uniform lookup and per-frame upload were removed here (issue #15).
       u_Resolution: gl.getUniformLocation(programs.pathtrace, "u_Resolution")!,
@@ -94,6 +98,8 @@ export class Renderer {
       u_Light: getLightUniforms(gl, programs.local),
       u_Ellipsoids: gl.getUniformLocation(programs.local, "u_Ellipsoids")!,
       u_Triangles: gl.getUniformLocation(programs.local, "u_Triangles")!,
+      u_BvhNodes: gl.getUniformLocation(programs.local, "u_BvhNodes")!,
+      u_BvhPrimIndices: gl.getUniformLocation(programs.local, "u_BvhPrimIndices")!,
       u_Resolution: gl.getUniformLocation(programs.local, "u_Resolution")!,
     };
     const displayUniforms = {
@@ -119,6 +125,9 @@ export class Renderer {
     // 12-float stride — no vec4 padding needed.
     gl.uniform3fv(p.u_Ellipsoids, flattenedEllipsoids);
     gl.uniform3fv(p.u_Triangles, flattenedTriangles);
+    // Issue #47: upload the BVH node array and the primitive permutation.
+    gl.uniform3fv(p.u_BvhNodes, flattenedBvhNodes);
+    gl.uniform3fv(p.u_BvhPrimIndices, flattenedBvhPrimIndices);
     gl.uniform1i(p.u_AccumTexture, 1);
     // Issue #58: static thin-lens DOF parameters.
     gl.uniform1f(p.u_ApertureRadius, APERTURE_RADIUS);
@@ -135,6 +144,9 @@ export class Renderer {
     gl.uniform3fv(l.u_Light.normal, light.normal);
     gl.uniform2fv(l.u_Light.size, light.size);
     gl.uniform3fv(l.u_Ellipsoids, flattenedEllipsoids);
+    // Issue #47
+    gl.uniform3fv(l.u_BvhNodes, flattenedBvhNodes);
+    gl.uniform3fv(l.u_BvhPrimIndices, flattenedBvhPrimIndices);
     gl.uniform3fv(l.u_Triangles, flattenedTriangles);
 
     // Issue #22: ResizeObserver alone handles canvas resizes — it fires whenever
@@ -153,6 +165,9 @@ export class Renderer {
       u_Light: { position: WebGLUniformLocation; color: WebGLUniformLocation; normal: WebGLUniformLocation; size: WebGLUniformLocation };
       u_Ellipsoids: WebGLUniformLocation;
       u_Triangles: WebGLUniformLocation;
+      // Issue #47
+      u_BvhNodes: WebGLUniformLocation;
+      u_BvhPrimIndices: WebGLUniformLocation;
       u_Resolution: WebGLUniformLocation;
       u_FrameCount: WebGLUniformLocation;
       u_AccumTexture: WebGLUniformLocation;
@@ -165,6 +180,9 @@ export class Renderer {
       u_Light: { position: WebGLUniformLocation; color: WebGLUniformLocation; normal: WebGLUniformLocation; size: WebGLUniformLocation };
       u_Ellipsoids: WebGLUniformLocation;
       u_Triangles: WebGLUniformLocation;
+      // Issue #47
+      u_BvhNodes: WebGLUniformLocation;
+      u_BvhPrimIndices: WebGLUniformLocation;
       u_Resolution: WebGLUniformLocation;
     };
     displayUniforms: { u_AccumTexture: WebGLUniformLocation; u_FrameCount: WebGLUniformLocation };

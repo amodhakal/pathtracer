@@ -3,11 +3,27 @@
 // before the source is handed to the GL compiler (issue #37).
 import commonChunk from "./shaders/chunks/common.glsl";
 import intersectionChunk from "./shaders/chunks/intersection.glsl";
+import bvhChunk from "./shaders/chunks/bvh.glsl";
+import {
+  bvhNodeCount,
+  BVH_NODE_VEC_SLOTS,
+  primitiveCount,
+} from "./bvh";
 
 const glslChunks: Record<string, string> = {
   common: commonChunk,
   intersection: intersectionChunk,
+  bvh: bvhChunk,
 };
+
+// Issue #47: scene-derived BVH sizes injected as defines so the uniform
+// array declarations in the fragment shaders can be sized exactly.
+export function injectBvhDefines(source: string): string {
+  return source.replace(
+    /^(#version[^\n]*\n)/,
+    `$1#define BVH_NODE_COUNT ${bvhNodeCount}\n#define BVH_NODE_SLOTS ${BVH_NODE_VEC_SLOTS}\n#define PRIMITIVE_COUNT ${primitiveCount}\n`
+  );
+}
 
 export function resolveIncludes(source: string): string {
   return source.replace(/^[ \t]*#include[ \t]+<([^>]+)>[ \t]*$/gm, (_match, name: string) => {

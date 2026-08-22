@@ -14,9 +14,12 @@ uniform vec3 u_Eye;
 uniform Light u_Light;
 uniform vec3 u_Ellipsoids[ELLIPSOID_COUNT * ELLIPSOID_VECTORS];
 uniform vec3 u_Triangles[TRIANGLE_COUNT * TRIANGLE_VECTORS];
+uniform vec3 u_BvhNodes[BVH_NODE_COUNT * BVH_NODE_SLOTS];
+uniform vec3 u_BvhPrimIndices[PRIMITIVE_COUNT];
 uniform vec2 u_Resolution;
 
 #include <intersection>
+#include <bvh>
 
 void main() {
     // Issue #21: aspect ratio handled by the shared FOV camera model.
