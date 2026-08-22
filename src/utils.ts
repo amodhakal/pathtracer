@@ -1,3 +1,24 @@
+// Shared GLSL chunk registry. Chunks live in src/shaders/chunks/ and are
+// inlined into a shader source by resolving `#include <name>` directives
+// before the source is handed to the GL compiler (issue #37).
+import commonChunk from "./shaders/chunks/common.glsl";
+import intersectionChunk from "./shaders/chunks/intersection.glsl";
+
+const glslChunks: Record<string, string> = {
+  common: commonChunk,
+  intersection: intersectionChunk,
+};
+
+export function resolveIncludes(source: string): string {
+  return source.replace(/^[ \t]*#include[ \t]+<([^>]+)>[ \t]*$/gm, (_match, name: string) => {
+    const chunk = glslChunks[name];
+    if (!chunk) {
+      throw new Error(`Unknown GLSL chunk: ${name}`);
+    }
+    return chunk;
+  });
+}
+
 export function createShader(
   gl: WebGL2RenderingContext,
   type: GLenum,
