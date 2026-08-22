@@ -422,12 +422,23 @@ vec3 tracePath(vec3 startPoint, vec3 startDirection) {
 }
 
 void main() {
-    vec2 pos = v_WindowPixels.xy;
-    pos.x *= u_Resolution.x / u_Resolution.y;
-
     vec3 rayOrigin = u_Eye;
-    vec3 targetPoint = vec3((pos.xy + 1.0f) * 0.5f, 0.0f);
-    vec3 rayDirection = normalize(targetPoint - rayOrigin);
+    vec2 ndc = v_WindowPixels.xy;
+
+    // Pinhole camera model with vertical FOV and aspect correction.
+    // tanHalfFov = 1.25 reproduces the legacy ray-gen mapping (ndc [-1,1]
+    // onto the z=0 plane at x,y in [0,2] from eye z=-0.4): vertical
+    // half-extent 0.5 / distance 0.4 = 1.25, i.e. vFOV ~= 102.6 degrees.
+    const float FOV_DEGREES = 102.6f;
+    float tanHalfFov = tan(radians(FOV_DEGREES) * 0.5f);
+    float aspect = u_Resolution.x / u_Resolution.y;
+
+    vec3 forward = vec3(0.0f, 0.0f, -1.0f);
+    vec3 right = vec3(1.0f, 0.0f, 0.0f) * tanHalfFov * aspect;
+    vec3 up = vec3(0.0f, 1.0f, 0.0f) * tanHalfFov;
+
+    vec3 rayDirection = normalize(
+        forward + right * ndc.x + up * ndc.y);
 
     vec3 sampleColor = tracePath(rayOrigin, rayDirection);
 
