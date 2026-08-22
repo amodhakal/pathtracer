@@ -3,7 +3,7 @@
 // load time by resolveIncludes() in src/utils.ts.
 
 #define MAX_TERM_COUNT 2
-#define ELLIPSOID_COUNT 5
+#define ELLIPSOID_COUNT 3
 #define ELLIPSOID_VECTORS 4
 #define TRIANGLE_COUNT 14
 #define TRIANGLE_VECTORS 5
