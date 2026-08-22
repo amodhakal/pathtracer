@@ -147,7 +147,7 @@ export const eye = new Float32Array([0.5, 0.5, -0.4]);
 export const time = Date.now();
 export const light = {
   position: new Float32Array([0.5, 0.96, 0.0]),
-  color: new Float32Array([1.0, 1.0, 1.0]),
+  color: new Float32Array([9.0, 9.0, 9.0]),
   normal: new Float32Array([0.0, -1.0, 0.0]),
   size: new Float32Array([0.1, 0.15]),
 };
