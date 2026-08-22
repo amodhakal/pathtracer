@@ -2,8 +2,6 @@
 export interface RenderTargets {
   textureWidth: number;
   textureHeight: number;
-  noiseTexture: WebGLTexture | null;
-  noiseFBO: WebGLFramebuffer | null;
   accumTextureA: WebGLTexture | null;
   accumTextureB: WebGLTexture | null;
   fboA: WebGLFramebuffer | null;
@@ -42,24 +40,18 @@ function attachAndCheck(
   }
 }
 
-/** Create the noise FBO plus two ping-pong accumulation FBOs at the given size. */
+/** Create the two ping-pong accumulation FBOs at the given size. */
 export function createRenderTargets(
   gl: WebGL2RenderingContext,
   width: number,
   height: number,
 ): RenderTargets {
-  // --- Noise Texture & FBO ---
-  // Issue #3: use a float texture so RNG values aren't quantized to 8 bits.
-  const noiseTexture = createTexture(gl, width, height, gl.RGBA32F, gl.RGBA, gl.FLOAT);
-  const noiseFBO = gl.createFramebuffer();
-
   // --- Ping-Pong Accumulation Textures & FBOs ---
   const accumTextureA = createTexture(gl, width, height, gl.RGBA32F, gl.RGBA, gl.FLOAT);
   const accumTextureB = createTexture(gl, width, height, gl.RGBA32F, gl.RGBA, gl.FLOAT);
   const fboA = gl.createFramebuffer();
   const fboB = gl.createFramebuffer();
 
-  attachAndCheck(gl, noiseFBO, noiseTexture, "noiseFBO");
   attachAndCheck(gl, fboA, accumTextureA, "fboA");
   attachAndCheck(gl, fboB, accumTextureB, "fboB");
 
@@ -75,8 +67,6 @@ export function createRenderTargets(
   return {
     textureWidth: width,
     textureHeight: height,
-    noiseTexture,
-    noiseFBO,
     accumTextureA,
     accumTextureB,
     fboA,
@@ -89,8 +79,6 @@ export function destroyRenderTargets(
   gl: WebGL2RenderingContext,
   targets: RenderTargets,
 ): void {
-  if (targets.noiseTexture) gl.deleteTexture(targets.noiseTexture);
-  if (targets.noiseFBO) gl.deleteFramebuffer(targets.noiseFBO);
   if (targets.accumTextureA) gl.deleteTexture(targets.accumTextureA);
   if (targets.accumTextureB) gl.deleteTexture(targets.accumTextureB);
   if (targets.fboA) gl.deleteFramebuffer(targets.fboA);

@@ -15,7 +15,6 @@ try {
     programs.pathtrace,
     programs.local,
     programs.display,
-    programs.noise,
   ]);
   new Renderer(canvas, gl, programs, geometry);
 } catch (err) {

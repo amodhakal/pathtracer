@@ -6,7 +6,9 @@ precision highp float;
 #define MAX_BOUNCES 200
 #define LIGHT_SAMPLES 4
 #define P_BOUNCE 0.5
-#define SHADOW_CLIP 0.001
+// Issue #14: use the shared RAY_EPSILON from common.glsl for all scale-dependent
+// geometric bias (ray-origin offsets and shadow-ray distance clipping).
+#define SHADOW_CLIP RAY_EPSILON
 
 // Issue #35: firefly clamping — bound each sample's radiance before it is
 // accumulated, so rare high-energy spikes (fireflies) can't dominate the
@@ -41,7 +43,6 @@ uniform float u_FrameCount;
 uniform vec3 u_EnvTop;
 uniform vec3 u_EnvBottom;
 uniform float u_EnvIntensity;
-uniform sampler2D u_NoiseTexture;
 uniform sampler2D u_AccumTexture;
 
 // Issue #57: albedo and normal map texture arrays. Each scene triangle can
@@ -85,31 +86,26 @@ vec3 sampleNormal(vec3 normal, Intersect hit) {
 }
 
 #include <intersection>
+#include <prng>
 
 vec3 tracePath(vec3 startPoint, vec3 startDirection);
 vec3 evaluateEnvironment(vec3 direction);
 vec3 sampleEnvironmentIllumination(vec3 point, vec3 normal, vec3 albedo);
 vec3 calculateDirectIllumination(vec3 point, vec3 normal, vec3 color);
 vec3 sampleBounceDirection(vec3 normal);
-bool isEmitter(float r, float g, float b);
+bool isEmitter(vec3 material);
 float fresnelSchlick(float cosTheta, float ior);
 vec3 calculateReflection(vec3 incident, vec3 faceNormal);
-vec3 calculateRefraction(vec3 incident, vec3 faceNormal, float ior);
+vec3 calculateRefraction(vec3 incident, vec3 faceNormal, float ior, out bool isTIR);
 
-int randIndex = 0;
-float getRand() {
-    int idx = randIndex++;
-    vec2 pixelCoord = (v_WindowPixels + 1.0) * 0.5;
-    vec2 offsets = vec2(
-        float(idx) * 0.6180339887498949,
-        u_FrameCount * 0.7548776662466927 + float(idx) * 0.2971213928707494
-    );
-    vec2 sampleCoord = fract(pixelCoord + offsets);
-    return texture(u_NoiseTexture, sampleCoord).r;
-}
+// Issue #29: RNG moved into the shader (chunks/prng.glsl). The seed is
+// initialized once per pixel per frame in main() from v_WindowPixels and
+// u_FrameCount; getRand() just advances the PRNG state.
 
-bool isEmitter(float r, float g, float b) {
-    return r > 1.0f || g > 1.0f || b > 1.0f;
+// Issue #9: emitters are identified by material type, never by inspecting
+// the albedo/color — bright diffuse materials must not be misclassified as lights.
+bool isEmitter(vec3 material) {
+    return int(material.x + 0.5f) == MATERIAL_EMISSIVE;
 }
 
 float fresnelSchlick(float cosTheta, float ior) {
@@ -122,7 +118,8 @@ vec3 calculateReflection(vec3 incident, vec3 faceNormal) {
     return incident - 2.0f * dot(faceNormal, incident) * faceNormal;
 }
 
-vec3 calculateRefraction(vec3 incident, vec3 faceNormal, float ior) {
+vec3 calculateRefraction(vec3 incident, vec3 faceNormal, float ior, out bool isTIR) {
+    isTIR = false;
     float entering = dot(incident, faceNormal) < 0.0f ? 1.0f : 0.0f;
     vec3 n = entering > 0.5f ? faceNormal : -faceNormal;
     float eta = entering > 0.5f ? 1.0f / ior : ior;
@@ -130,6 +127,7 @@ vec3 calculateRefraction(vec3 incident, vec3 faceNormal, float ior) {
     float cosI = -dot(n, incident);
     float sinT2 = eta * eta * (1.0f - cosI * cosI);
     if(sinT2 >= 1.0f) {
+        isTIR = true;
         return vec3(0.0f);
     }
 
@@ -362,22 +360,17 @@ vec3 sampleBounceDirection(vec3 normal) {
     vec3 tangent = normalize(cross(basis, normal));
     vec3 bitangent = cross(normal, tangent);
 
-    const int MAX_ITERS = 32;
-    vec3 result = normalize(tangent + bitangent + normal);
-    for(int i = 0; i < MAX_ITERS; i++) {
-        float x = getRand() * 2.0f - 1.0f;
-        float y = getRand() * 2.0f - 1.0f;
-        float z = getRand() * 2.0f;
-        vec3 local = vec3(x, y, z);
+    // Issue #30: cosine-weighted hemisphere sampling — sample the unit disk
+    // and project up, giving a direction density proportional to cos(theta)
+    // about the normal. No rejection loop needed; the BRDF's cosine factor
+    // cancels the pdf for Lambertian surfaces.
+    float r = sqrt(getRand());
+    float phi = 6.28318530718f * getRand();
+    float x = r * cos(phi);
+    float y = r * sin(phi);
+    float z = sqrt(max(0.0f, 1.0f - x * x - y * y));
 
-        if(dot(local, local) <= 1.0f) {
-            local = normalize(local);
-            result = local.x * tangent + local.y * bitangent + local.z * normal;
-            break;
-        }
-    }
-
-    return result;
+    return x * tangent + y * bitangent + z * normal;
 }
 
 vec3 tracePath(vec3 startPoint, vec3 startDirection) {
@@ -404,7 +397,7 @@ vec3 tracePath(vec3 startPoint, vec3 startDirection) {
         hit.color = sampleAlbedo(hit.color, hit);
         hit.normal = sampleNormal(hit.normal, hit);
 
-        if(isEmitter(hit.color.r, hit.color.g, hit.color.b)) {
+        if(isEmitter(hit.material)) {
             accumulated += throughput * hit.color;
             break;
         }
@@ -419,7 +412,7 @@ vec3 tracePath(vec3 startPoint, vec3 startDirection) {
 
         if(materialType == MATERIAL_MIRROR) {
             direction = calculateReflection(direction, hit.normal);
-            point = hit.intersect + hit.normal * CLIP_VAL;
+            point = hit.intersect + hit.normal * RAY_EPSILON;
             throughput *= hit.color;
             suppressEnvHit = false;
 
@@ -439,17 +432,18 @@ vec3 tracePath(vec3 startPoint, vec3 startDirection) {
         if(materialType == MATERIAL_GLASS) {
             float opacity = hit.material.z;
 
-            vec3 refracted = calculateRefraction(direction, hit.normal, hit.material.y);
+            bool isTIR;
+            vec3 refracted = calculateRefraction(direction, hit.normal, hit.material.y, isTIR);
             vec3 reflected = calculateReflection(direction, hit.normal);
 
             float cosTheta = abs(dot(hit.normal, direction));
             float fresnel = fresnelSchlick(cosTheta, hit.material.y);
 
-            bool isReflecting = refracted == vec3(0.0f) || getRand() < fresnel;
+            bool isReflecting = isTIR || getRand() < fresnel;
             direction = isReflecting ? reflected : refracted;
             suppressEnvHit = false;
             vec3 travelSide = dot(direction, hit.normal) < 0.0f ? -hit.normal : hit.normal;
-            point = hit.intersect + travelSide * CLIP_VAL;
+            point = hit.intersect + travelSide * RAY_EPSILON;
             throughput *= mix(vec3(1.0f), hit.color, opacity);
 
             if(depth > 1 && getRand() < P_BOUNCE) {
@@ -583,7 +577,7 @@ vec3 tracePath(vec3 startPoint, vec3 startDirection) {
             break;
         }
 
-        point = hit.intersect + hit.normal * CLIP_VAL;
+        point = hit.intersect + hit.normal * RAY_EPSILON;
         direction = bounceDirection;
     }
 
@@ -591,18 +585,16 @@ vec3 tracePath(vec3 startPoint, vec3 startDirection) {
 }
 
 void main() {
-    vec2 pos = v_WindowPixels.xy;
-    pos.x *= u_Resolution.x / u_Resolution.y;
-
-    // Issue #12: sub-pixel jitter — offset by a random amount within the pixel
-    // each frame so averaging over accumulated frames converges to anti-aliasing.
-    // After aspect-scaling pos.x, one screen pixel spans 1/res.y in both axes.
+    // Issue #21: aspect ratio handled by the shared FOV camera model
+    // (see common.glsl). Sub-pixel jitter (issue #12) is applied in NDC,
+    // where one screen pixel spans 2/res in both axes.
+    // Issue #29: seed the per-pixel PRNG before the first getRand() call.
+    initRng(v_WindowPixels, u_FrameCount);
     float pixelSize = 2.0f / u_Resolution.y;
     vec2 jitter = (vec2(getRand(), getRand()) - 0.5f) * pixelSize;
 
     vec3 rayOrigin = u_Eye;
-    vec3 targetPoint = vec3((pos.xy + jitter + 1.0f) * 0.5f, 0.0f);
-    vec3 rayDirection = normalize(targetPoint - rayOrigin);
+    vec3 rayDirection = generateCameraRay(v_WindowPixels.xy + jitter, u_Resolution, u_Eye);
 
     vec3 sampleColor = tracePath(rayOrigin, rayDirection);
 

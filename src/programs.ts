@@ -4,13 +4,11 @@ import vertexCode from "./shaders/shaders.vert";
 import pathtraceFragCode from "./shaders/pathtrace.frag";
 import localFragCode from "./shaders/local.frag";
 import displayFragCode from "./shaders/display.frag";
-import noiseGenFragCode from "./shaders/noiseGen.frag";
 
 export interface Programs {
   pathtrace: WebGLProgram;
   local: WebGLProgram;
   display: WebGLProgram;
-  noise: WebGLProgram;
 }
 
 export function createPrograms(gl: WebGL2RenderingContext): Programs {
@@ -25,8 +23,5 @@ export function createPrograms(gl: WebGL2RenderingContext): Programs {
   const displayShader = createShader(gl, gl.FRAGMENT_SHADER, displayFragCode);
   const display = createProgram(gl, vertexShader, displayShader);
 
-  const noiseShader = createShader(gl, gl.FRAGMENT_SHADER, noiseGenFragCode);
-  const noise = createProgram(gl, vertexShader, noiseShader);
-
-  return { pathtrace, local, display, noise };
+  return { pathtrace, local, display };
 }
