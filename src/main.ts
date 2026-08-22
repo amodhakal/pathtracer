@@ -317,10 +317,25 @@ try {
     requestAnimationFrame(render);
   }
 
+  /**
+   * Internal render resolution scale relative to the canvas's CSS size.
+   *
+   * The framebuffer is sized as clientWidth/Height * RENDER_SCALE while the
+   * canvas element stays at its full CSS size (the browser upsamples the
+   * drawing buffer). On HiDPI ("retina") displays devicePixelRatio can be 2+
+   * which would multiply the fragment cost by 4x or more for little visible
+   * benefit in a path tracer — clamping to min(devicePixelRatio, 1) renders
+   * at most 1 device pixel per pixel.
+   *
+   * Single source of truth for render scaling: a future UI control
+   * (e.g. issue #59's render-scale slider) should replace/update this
+   * constant rather than introducing a parallel factor.
+   */
+  const RENDER_SCALE = Math.min(window.devicePixelRatio || 1, 1);
+
   function resizeCanvas() {
-    const dpr = window.devicePixelRatio || 1;
-    const width = Math.max(1, Math.round(canvas.clientWidth * dpr));
-    const height = Math.max(1, Math.round(canvas.clientHeight * dpr));
+    const width = Math.max(1, Math.round(canvas.clientWidth * RENDER_SCALE));
+    const height = Math.max(1, Math.round(canvas.clientHeight * RENDER_SCALE));
 
     if (canvas.width === width && canvas.height === height) return;
 
