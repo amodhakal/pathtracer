@@ -63,7 +63,6 @@ uniform vec3 u_Triangles[TRIANGLE_COUNT * TRIANGLE_VECTORS];
 uniform float u_Time;
 uniform vec2 u_Resolution;
 uniform float u_FrameCount;
-uniform sampler2D u_NoiseTexture;
 uniform sampler2D u_AccumTexture;
 
 vec3 tracePath(vec3 startPoint, vec3 startDirection);
@@ -78,12 +77,32 @@ float fresnelSchlick(float cosTheta, float ior);
 vec3 calculateReflection(vec3 incident, vec3 faceNormal);
 vec3 calculateRefraction(vec3 incident, vec3 faceNormal, float ior);
 
-int randIndex = 0;
-float getRand() {
-    int idx = randIndex++;
+// Issue #29: in-shader PCG hash PRNG replaces the 8-bit noise-texture RNG.
+// Each invocation gets its own state, seeded from gl_FragCoord and the frame
+// count (u_FrameCount) so samples decorrelate per frame. getRand() advances
+// the state on every call.
+uint pcgHash(uint input) {
+    uint state = input * 747796405u + 2891336453u;
+    uint word = ((state >> ((state >> 28u) + 4u)) ^ state) * 277803737u;
+    return (word >> 22u) ^ word;
+}
+
+uint rngState = 0u;
+
+void initRand() {
     vec2 pixelCoord = (v_WindowPixels + 1.0) * 0.5;
-    vec2 sampleCoord = fract(pixelCoord + vec2(float(idx) * 0.6180339887498949, u_FrameCount * 0.7548776662466927));
-    return texture(u_NoiseTexture, sampleCoord).r;
+    uvec2 pixel = uvec2(pixelCoord * u_Resolution);
+    // Mix in the pixel coordinates and the frame counter so each pixel gets an
+    // independent stream that changes every accumulated frame.
+    rngState = pcgHash(pixel.x) ^ (pcgHash(pixel.y) * 0x9E3779B9u)
+             ^ pcgHash(floatBitsToUint(u_FrameCount));
+}
+
+float getRand() {
+    rngState = rngState * 747796405u + 2891336453u;
+    uint word = ((rngState >> ((rngState >> 28u) + 4u)) ^ rngState) * 277803737u;
+    word = (word >> 22u) ^ word;
+    return float(word) / 4294967296.0;
 }
 
 bool isEmitter(float r, float g, float b) {
@@ -429,7 +448,9 @@ void main() {
     vec3 targetPoint = vec3((pos.xy + 1.0f) * 0.5f, 0.0f);
     vec3 rayDirection = normalize(targetPoint - rayOrigin);
 
-    vec3 sampleColor = tracePath(rayOrigin, rayDirection);
+    vec3 sampleColor;
+    initRand();
+    sampleColor = tracePath(rayOrigin, rayDirection);
 
     vec2 uv = (v_WindowPixels + 1.0) * 0.5;
     vec3 prevColor = texture(u_AccumTexture, uv).rgb;

@@ -2,7 +2,6 @@ import vertexCode from "./shaders/shaders.vert";
 import pathtraceFragCode from "./shaders/pathtrace.frag";
 import localFragCode from "./shaders/local.frag";
 import displayFragCode from "./shaders/display.frag";
-import noiseGenFragCode from "./shaders/noiseGen.frag";
 import { createProgram, createShader } from "./utils";
 import { vertices, flattenedTriangles, flattenedEllipsoids, light, eye } from "./constants";
 
@@ -56,9 +55,6 @@ try {
   const displayShader = createShader(gl, gl.FRAGMENT_SHADER, displayFragCode);
   const displayProgram = createProgram(gl, vertexShader, displayShader);
 
-  const noiseGenShader = createShader(gl, gl.FRAGMENT_SHADER, noiseGenFragCode);
-  const noiseProgram = createProgram(gl, vertexShader, noiseGenShader);
-
   const vertexBuffer = gl.createBuffer();
   gl.bindBuffer(gl.ARRAY_BUFFER, vertexBuffer);
   gl.bufferData(gl.ARRAY_BUFFER, vertices, gl.STATIC_DRAW);
@@ -66,13 +62,10 @@ try {
   const posLocPathtrace = gl.getAttribLocation(pathtraceProgram, "a_Position");
   const posLocLocal = gl.getAttribLocation(localProgram, "a_Position");
   const posLocDisplay = gl.getAttribLocation(displayProgram, "a_Position");
-  const posLocNoise = gl.getAttribLocation(noiseProgram, "a_Position");
 
   let textureWidth = 0;
   let textureHeight = 0;
 
-  let noiseTexture: WebGLTexture | null = null;
-  let noiseFBO: WebGLFramebuffer | null = null;
   let accumTextureA: WebGLTexture | null = null;
   let accumTextureB: WebGLTexture | null = null;
   let fboA: WebGLFramebuffer | null = null;
@@ -99,8 +92,6 @@ try {
 
   function setupFramebuffers(width: number, height: number) {
     if (!gl) return;
-    if (noiseTexture) gl.deleteTexture(noiseTexture);
-    if (noiseFBO) gl.deleteFramebuffer(noiseFBO);
     if (accumTextureA) gl.deleteTexture(accumTextureA);
     if (accumTextureB) gl.deleteTexture(accumTextureB);
     if (fboA) gl.deleteFramebuffer(fboA);
@@ -108,18 +99,6 @@ try {
 
     textureWidth = width;
     textureHeight = height;
-
-    // --- Noise Texture & FBO ---
-    noiseTexture = createTexture(width, height, gl.RGBA8, gl.RGBA, gl.UNSIGNED_BYTE);
-    noiseFBO = gl.createFramebuffer();
-    gl.bindFramebuffer(gl.FRAMEBUFFER, noiseFBO);
-    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, noiseTexture, 0);
-    {
-      const status = gl.checkFramebufferStatus(gl.FRAMEBUFFER);
-      if (status !== gl.FRAMEBUFFER_COMPLETE) {
-        console.error("noiseFBO is incomplete:", status);
-      }
-    }
 
     // --- Ping-Pong Accumulation Textures & FBOs ---
     accumTextureA = createTexture(width, height, gl.RGBA32F, gl.RGBA, gl.FLOAT);
@@ -177,13 +156,7 @@ try {
     // dead uniform lookup and per-frame upload were removed here (issue #15).
     u_Resolution: gl.getUniformLocation(pathtraceProgram, "u_Resolution")!,
     u_FrameCount: gl.getUniformLocation(pathtraceProgram, "u_FrameCount")!,
-    u_NoiseTexture: gl.getUniformLocation(pathtraceProgram, "u_NoiseTexture")!,
     u_AccumTexture: gl.getUniformLocation(pathtraceProgram, "u_AccumTexture")!,
-  };
-
-  const noiseUniforms = {
-    u_Seed: gl.getUniformLocation(noiseProgram, "u_Seed")!,
-    u_Resolution: gl.getUniformLocation(noiseProgram, "u_Resolution")!,
   };
 
   const localUniforms = {
@@ -206,24 +179,6 @@ try {
     u_AccumTexture: gl.getUniformLocation(displayProgram, "u_AccumTexture")!,
   };
 
-  function renderNoise() {
-    if (!gl) return;
-    gl.bindFramebuffer(gl.FRAMEBUFFER, noiseFBO);
-    gl.viewport(0, 0, textureWidth, textureHeight);
-    gl.useProgram(noiseProgram);
-
-    gl.enableVertexAttribArray(posLocNoise);
-    gl.vertexAttribPointer(posLocNoise, 2, gl.FLOAT, false, 0, 0);
-
-    // Issue #4 / #96: deterministic per-run seed that varies per accumulated
-    // frame so Monte-Carlo samples decorrelate while runs stay reproducible.
-    const FIXED_NOISE_SEED = 19700101.0;
-    gl.uniform1f(noiseUniforms.u_Seed, FIXED_NOISE_SEED + frameCount);
-    gl.uniform2f(noiseUniforms.u_Resolution, textureWidth, textureHeight);
-
-    gl.drawArrays(gl.TRIANGLES, 0, 6);
-  }
-
   function renderPathtrace() {
     if (!gl) return;
     gl.bindFramebuffer(gl.FRAMEBUFFER, writeFbo);
@@ -233,15 +188,10 @@ try {
     gl.enableVertexAttribArray(posLocPathtrace);
     gl.vertexAttribPointer(posLocPathtrace, 2, gl.FLOAT, false, 0, 0);
 
-    // Bind noiseTexture to unit 0
+    // Bind read accumulation texture to unit 0
     gl.activeTexture(gl.TEXTURE0);
-    gl.bindTexture(gl.TEXTURE_2D, noiseTexture);
-    gl.uniform1i(pathtraceUniforms.u_NoiseTexture, 0);
-
-    // Bind read accumulation texture to unit 1
-    gl.activeTexture(gl.TEXTURE1);
     gl.bindTexture(gl.TEXTURE_2D, readTex);
-    gl.uniform1i(pathtraceUniforms.u_AccumTexture, 1);
+    gl.uniform1i(pathtraceUniforms.u_AccumTexture, 0);
 
     gl.uniform3fv(pathtraceUniforms.u_Eye, eye);
     gl.uniform3fv(pathtraceUniforms.u_Light.position, light.position);
@@ -296,7 +246,6 @@ try {
 
   function render() {
     if (pathTracingEnabled) {
-      renderNoise();
       renderPathtrace();
       renderDisplay();
 
@@ -352,7 +301,7 @@ try {
 
     canvas.width = width;
     canvas.height = height;
-    // Issue #23: only rebuild noise/accumulation FBOs when path tracing is active.
+    // Issue #23: only rebuild accumulation FBOs when path tracing is active.
     // In local shading mode rendering goes straight to the backbuffer and the
     // FBOs are unused, so rebuilding them (and resetting frameCount) is wasted work.
     if (pathTracingEnabled) {
