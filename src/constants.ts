@@ -27,6 +27,12 @@ export const THINFILM_THICKNESS_NM = 400.0;
 // Issue #57: texture id sentinel meaning "no texture bound" for a triangle.
 export const NO_TEXTURE = -1;
 
+// Issue #58: thin-lens depth-of-field parameters. The focal plane sits at
+// FOCAL_DISTANCE along the view direction; points off that plane blur by an
+// amount proportional to APERTURE_RADIUS (0 = pinhole, i.e. no DOF).
+export const APERTURE_RADIUS = 0.02;
+export const FOCAL_DISTANCE = 1.2;
+
 interface SceneTriangle {
   vertex1: Float32Array;
   vertex2: Float32Array;

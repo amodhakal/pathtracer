@@ -2,7 +2,15 @@
 //
 // Issue #39: adopt VAOs — draw calls bind a preconfigured vertex array object
 // instead of re-calling enableVertexAttribArray/vertexAttribPointer per frame.
-import { flattenedTriangles, flattenedEllipsoids, light, eye } from "./constants";
+import {
+  flattenedTriangles,
+  flattenedEllipsoids,
+  light,
+  eye,
+  // Issue #58: thin-lens depth-of-field parameters.
+  APERTURE_RADIUS,
+  FOCAL_DISTANCE,
+} from "./constants";
 import type { Programs } from "./programs";
 import type { QuadGeometry } from "./geometry";
 import { createRenderTargets, destroyRenderTargets, type RenderTargets } from "./framebuffers";
@@ -77,6 +85,9 @@ export class Renderer {
       u_FrameCount: gl.getUniformLocation(programs.pathtrace, "u_FrameCount")!,
       u_NoiseTexture: gl.getUniformLocation(programs.pathtrace, "u_NoiseTexture")!,
       u_AccumTexture: gl.getUniformLocation(programs.pathtrace, "u_AccumTexture")!,
+      // Issue #58: thin-lens DOF.
+      u_ApertureRadius: gl.getUniformLocation(programs.pathtrace, "u_ApertureRadius")!,
+      u_FocalDistance: gl.getUniformLocation(programs.pathtrace, "u_FocalDistance")!,
     };
     const localUniforms = {
       u_Eye: gl.getUniformLocation(programs.local, "u_Eye")!,
@@ -109,6 +120,9 @@ export class Renderer {
     gl.uniform3fv(p.u_Ellipsoids, flattenedEllipsoids);
     gl.uniform3fv(p.u_Triangles, flattenedTriangles);
     gl.uniform1i(p.u_AccumTexture, 1);
+    // Issue #58: static thin-lens DOF parameters.
+    gl.uniform1f(p.u_ApertureRadius, APERTURE_RADIUS);
+    gl.uniform1f(p.u_FocalDistance, FOCAL_DISTANCE);
 
     gl.useProgram(programs.display);
     gl.uniform1i(this.uniforms.displayUniforms.u_AccumTexture, 0);
@@ -142,6 +156,9 @@ export class Renderer {
       u_Resolution: WebGLUniformLocation;
       u_FrameCount: WebGLUniformLocation;
       u_AccumTexture: WebGLUniformLocation;
+      // Issue #58: thin-lens DOF.
+      u_ApertureRadius: WebGLUniformLocation;
+      u_FocalDistance: WebGLUniformLocation;
     };
     localUniforms: {
       u_Eye: WebGLUniformLocation;
