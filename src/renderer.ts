@@ -78,10 +78,6 @@ export class Renderer {
       u_NoiseTexture: gl.getUniformLocation(programs.pathtrace, "u_NoiseTexture")!,
       u_AccumTexture: gl.getUniformLocation(programs.pathtrace, "u_AccumTexture")!,
     };
-    const noiseUniforms = {
-      u_Seed: gl.getUniformLocation(programs.noise, "u_Seed")!,
-      u_Resolution: gl.getUniformLocation(programs.noise, "u_Resolution")!,
-    };
     const localUniforms = {
       u_Eye: gl.getUniformLocation(programs.local, "u_Eye")!,
       u_Light: getLightUniforms(gl, programs.local),
@@ -96,7 +92,7 @@ export class Renderer {
       // Issue #11: frame count used to divide the accumulated sum.
       u_FrameCount: gl.getUniformLocation(programs.display, "u_FrameCount")!,
     };
-    this.uniforms = { pathtraceUniforms, noiseUniforms, localUniforms, displayUniforms };
+    this.uniforms = { pathtraceUniforms, localUniforms, displayUniforms };
 
     // Issue #41: static uniforms (scene data + sampler bindings) are uploaded
     // once at init instead of every frame. Only truly per-frame values (seed,
@@ -112,7 +108,6 @@ export class Renderer {
     // 12-float stride — no vec4 padding needed.
     gl.uniform3fv(p.u_Ellipsoids, flattenedEllipsoids);
     gl.uniform3fv(p.u_Triangles, flattenedTriangles);
-    gl.uniform1i(p.u_NoiseTexture, 0);
     gl.uniform1i(p.u_AccumTexture, 1);
 
     gl.useProgram(programs.display);
@@ -146,10 +141,8 @@ export class Renderer {
       u_Triangles: WebGLUniformLocation;
       u_Resolution: WebGLUniformLocation;
       u_FrameCount: WebGLUniformLocation;
-      u_NoiseTexture: WebGLUniformLocation;
       u_AccumTexture: WebGLUniformLocation;
     };
-    noiseUniforms: { u_Seed: WebGLUniformLocation; u_Resolution: WebGLUniformLocation };
     localUniforms: {
       u_Eye: WebGLUniformLocation;
       u_Light: { position: WebGLUniformLocation; color: WebGLUniformLocation; normal: WebGLUniformLocation; size: WebGLUniformLocation };
@@ -170,23 +163,6 @@ export class Renderer {
     this.frameCount = 0;
   }
 
-  private renderNoise(): void {
-    const { gl } = this;
-    const t = this.targets!;
-    gl.bindFramebuffer(gl.FRAMEBUFFER, t.noiseFBO);
-    gl.viewport(0, 0, t.textureWidth, t.textureHeight);
-    gl.useProgram(this.programs.noise);
-    gl.bindVertexArray(this.geometry.vaos[3]);
-
-    // Issue #4 / #96: deterministic per-run seed that varies per accumulated
-    // frame so Monte-Carlo samples decorrelate while runs stay reproducible.
-    const FIXED_NOISE_SEED = 19700101.0;
-    gl.uniform1f(this.uniforms.noiseUniforms.u_Seed, FIXED_NOISE_SEED + this.frameCount);
-    gl.uniform2f(this.uniforms.noiseUniforms.u_Resolution, t.textureWidth, t.textureHeight);
-    gl.drawArrays(gl.TRIANGLES, 0, 6);
-    gl.bindVertexArray(null);
-  }
-
   private renderPathtrace(): void {
     const { gl } = this;
     const t = this.targets!;
@@ -197,8 +173,7 @@ export class Renderer {
 
     // Issue #41: texture unit bindings are static and set once at init,
     // but which texture is "read" ping-pongs, so bind per frame here.
-    gl.activeTexture(gl.TEXTURE0);
-    gl.bindTexture(gl.TEXTURE_2D, t.noiseTexture);
+    // Issue #29: no noise texture — the PRNG lives in-shader now.
 
     // Bind read accumulation texture to unit 1
     gl.activeTexture(gl.TEXTURE1);
@@ -248,7 +223,6 @@ export class Renderer {
 
   private render = (): void => {
     if (pathTracingEnabled) {
-      this.renderNoise();
       this.renderPathtrace();
       this.renderDisplay();
 

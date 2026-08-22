@@ -29,6 +29,7 @@ describe("shader sources", () => {
     expect(common).toContain("#define MATERIAL_EMISSIVE 4");
     expect(common).toContain("#define MATERIAL_CLEARCOAT 5");
     expect(common).toContain("#define MATERIAL_THINFILM 6");
+  });
   // Issue #29: the noise-texture RNG pass was removed; the RNG now lives in
   // chunks/prng.glsl and pathtrace.frag must include and seed it.
   it("pathtrace.frag uses the in-shader PRNG chunk", () => {
