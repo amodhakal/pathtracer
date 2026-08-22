@@ -13,10 +13,21 @@ precision highp float;
 // running average. Applied per-sample in main(), not per-bounce.
 #define FIREFLY_CLAMP 10.0
 
+// Issue #55: emissive material strength (radiance multiplier for MATERIAL_EMISSIVE)
+#define EMISSIVE_STRENGTH 4.0
+
 // Material encoding packed as vec3(x = material type, y = IOR, z = opacity)
+// Issue #55: extended encoding — y/z take material-specific meanings:
+//   GGX       : y = roughness, z = metalness
+//   CLEARCOAT : y = base roughness, z = coat strength
+//   THINFILM  : y = film thickness [nm], z = film IOR
 #define MATERIAL_DIFFUSE 0
 #define MATERIAL_MIRROR 1
 #define MATERIAL_GLASS 2
+#define MATERIAL_GGX 3
+#define MATERIAL_EMISSIVE 4
+#define MATERIAL_CLEARCOAT 5
+#define MATERIAL_THINFILM 6
 
 struct Light {
     vec3 position;
@@ -116,6 +127,78 @@ vec3 calculateRefraction(vec3 incident, vec3 faceNormal, float ior) {
 
     float cosT = sqrt(1.0f - sinT2);
     return eta * incident + (eta * cosI - cosT) * n;
+}
+
+// ---- Issue #55: BSDF helpers for the new material types -------------------
+
+vec3 buildOrthonormalBasis(vec3 normal, out vec3 tangent, out vec3 bitangent) {
+    vec3 basis = abs(normal.x) > 0.9f ? vec3(0.0f, 1.0f, 0.0f) : vec3(1.0f, 0.0f, 0.0f);
+    tangent = normalize(cross(basis, normal));
+    bitangent = cross(normal, tangent);
+    return basis;
+}
+
+// GGX normal distribution (isotropic)
+float ggxDistribution(float ndoth, float alpha) {
+    float alpha2 = alpha * alpha;
+    float d = ndoth * ndoth * (alpha2 - 1.0f) + 1.0f;
+    return alpha2 / max(3.14159265f * d * d, CLIP_VAL);
+}
+
+// Smith height-correlated visibility approximation (Hammon 2017)
+float smithVisibilityApprox(float ndotv, float ndotl, float alpha) {
+    return 0.5f / max(mix(2.0f * ndotl * ndotv, ndotl + ndotv, alpha), CLIP_VAL);
+}
+
+// Fresnel for a metallic F0 tinted by base color; dielectric uses Schlick
+vec3 fresnelSchlickVec(float cosTheta, vec3 f0) {
+    return f0 + (vec3(1.0f) - f0) * pow(1.0f - cosTheta, 5.0f);
+}
+
+// Sample a half-vector from the GGX NDF around the given normal (VNDF-free
+// simple D-based sampling — adequate for a path tracer of this scale).
+vec3 sampleGGXHalfVector(vec3 normal, float roughness) {
+    vec3 tangent, bitangent;
+    buildOrthonormalBasis(normal, tangent, bitangent);
+
+    const int MAX_ITERS = 32;
+    for(int i = 0; i < MAX_ITERS; i++) {
+        float u1 = getRand();
+        float u2 = getRand();
+        float phi = 2.0f * 3.14159265f * u1;
+        float cosTheta = sqrt((1.0f - u2) / (1.0f + (roughness * roughness - 1.0f) * u2));
+        float sinTheta = sqrt(max(1.0f - cosTheta * cosTheta, 0.0f));
+
+        vec3 local = vec3(sinTheta * cos(phi), sinTheta * sin(phi), cosTheta);
+        if(local.z > 0.0f) {
+            return normalize(local.x * tangent + local.y * bitangent + local.z * normal);
+        }
+    }
+    return normal;
+}
+
+// Thin-film interference reflectance: two-interface Airy-like approximation.
+// Returns per-channel spectral multiplier in [0,1] for light reflecting off
+// the top surface vs. the phase-shifted reflection off the film/substrate
+// interface. thickness is in nanometers, ior is the film's index.
+vec3 thinFilmReflectance(float cosTheta, float thicknessNm, float ior) {
+    // Optical path difference in nm between the two reflected beams.
+    float sinThetaT2 = (1.0f - cosTheta * cosTheta) / max(ior * ior, 1.0001f);
+    float cosThetaT = sqrt(max(1.0f - sinThetaT2, 0.0f));
+    float opd = 2.0f * ior * thicknessNm * cosThetaT;
+
+    // Evaluate interference at representative RGB wavelengths (nm).
+    vec3 wavelengthNm = vec3(680.0f, 550.0f, 440.0f);
+    vec3 phase = 4.0f * 3.14159265f * opd / wavelengthNm;
+
+    // Two-beam interference: intensity ~ 0.5 + 0.5*cos(phase), normalized to [0,1].
+    return clamp(vec3(0.5f) + 0.5f * cos(phase), vec3(0.0f), vec3(1.0f));
+}
+
+// Emissive check decoupled from brightness threshold: MATERIAL_EMISSIVE hits
+// emit hit.color * strength regardless of whether color exceeds 1.
+bool isEmissiveMaterial(vec3 material) {
+    return int(material.x + 0.5f) == MATERIAL_EMISSIVE;
 }
 
 vec3 calculateDirectIllumination(vec3 point, vec3 normal, vec3 color) {
@@ -235,6 +318,12 @@ vec3 tracePath(vec3 startPoint, vec3 startDirection) {
 
         int materialType = int(hit.material.x + 0.5f);
 
+        // Issue #55: decoupled emissive — emit regardless of color brightness.
+        if(isEmissiveMaterial(hit.material)) {
+            accumulated += throughput * hit.color * EMISSIVE_STRENGTH;
+            break;
+        }
+
         if(materialType == MATERIAL_MIRROR) {
             direction = calculateReflection(direction, hit.normal);
             point = hit.intersect + hit.normal * CLIP_VAL;
@@ -282,6 +371,102 @@ vec3 tracePath(vec3 startPoint, vec3 startDirection) {
                 break;
             }
 
+            continue;
+        }
+
+        // Issue #55: thin-film mirror — interference-tinted reflection.
+        if(materialType == MATERIAL_THINFILM) {
+            float cosTheta = abs(dot(hit.normal, direction));
+            vec3 tint = thinFilmReflectance(cosTheta, hit.material.y, hit.material.z);
+
+            direction = calculateReflection(direction, hit.normal);
+            point = hit.intersect + hit.normal * CLIP_VAL;
+            throughput *= tint;
+
+            if(depth > 1 && getRand() < P_BOUNCE) {
+                break;
+            }
+            continue;
+        }
+
+        // Issue #55: GGX metalness/roughness BRDF — sample the NDF for the
+        // microfacet half-vector, evaluate D*G*F, keep energy via the pdf.
+        if(materialType == MATERIAL_GGX) {
+            float roughness = clamp(hit.material.y, 0.02f, 1.0f);
+            float metalness = clamp(hit.material.z, 0.0f, 1.0f);
+            float alpha = roughness * roughness;
+
+            vec3 viewDir = -direction;
+            vec3 halfVector = sampleGGXHalfVector(hit.normal, roughness);
+            vec3 lightDir = reflect(direction, halfVector);
+
+            float ndotl = dot(hit.normal, lightDir);
+            float ndotv = dot(hit.normal, viewDir);
+            float ndoth = max(dot(hit.normal, halfVector), 0.0f);
+            float vdoth = max(dot(viewDir, halfVector), 0.0f);
+
+            if(ndotl <= 0.0f || ndotv <= 0.0f) {
+                break;
+            }
+
+            vec3 f0 = mix(vec3(0.04f), hit.color, metalness);
+            vec3 fresnel = fresnelSchlickVec(vdoth, f0);
+            float dTerm = ggxDistribution(ndoth, alpha);
+            float gTerm = smithVisibilityApprox(ndotv, ndotl, alpha);
+
+            // Specular weight over the sampling pdf pdf(h) = D * ndoth.
+            vec3 specular = dTerm * gTerm * fresnel
+                / max(4.0f * ndotv * ndotl, CLIP_VAL)
+                * ndotl / max(dTerm * ndoth, CLIP_VAL);
+
+            // Diffuse (Lambert) part only for non-metals; metals absorb.
+            vec3 kd = (vec3(1.0f) - fresnel) * (1.0f - metalness) / 3.14159265f;
+            vec3 brdfWeight = specular + kd * hit.color;
+
+            accumulated += throughput * calculateDirectIllumination(
+                hit.intersect, hit.normal,
+                clamp(brdfWeight, vec3(0.0f), vec3(4.0f)));
+
+            direction = normalize(lightDir);
+            point = hit.intersect + hit.normal * CLIP_VAL;
+            throughput *= clamp(brdfWeight, vec3(0.0f), vec3(4.0f));
+
+            if(depth > 1 && getRand() < P_BOUNCE) {
+                break;
+            }
+            if(max(throughput.r, max(throughput.g, throughput.b)) < 0.001f) {
+                break;
+            }
+            continue;
+        }
+
+        // Issue #55: clearcoat — glossy coat lobe over a diffuse base.
+        if(materialType == MATERIAL_CLEARCOAT) {
+            float coatStrength = clamp(hit.material.z, 0.0f, 1.0f);
+            bool isCoat = getRand() < coatStrength;
+
+            if(isCoat) {
+                // Coat: perfect specular reflection scaled by Fresnel at ~1.5 IOR.
+                float fresnel = fresnelSchlick(abs(dot(hit.normal, direction)), 1.5f);
+                direction = calculateReflection(direction, hit.normal);
+                point = hit.intersect + hit.normal * CLIP_VAL;
+                throughput *= vec3(fresnel);
+            } else {
+                // Base: Lambert bounce with direct lighting.
+                accumulated += throughput * calculateDirectIllumination(hit.intersect, hit.normal, hit.color);
+                vec3 bounceDirection = sampleBounceDirection(hit.normal);
+                float weight = max(dot(hit.normal, bounceDirection), 0.0f) / max(P_BOUNCE, CLIP_VAL);
+                throughput *= hit.color * weight;
+                direction = bounceDirection;
+                point = hit.intersect + hit.normal * CLIP_VAL;
+            }
+
+            if(depth > 1 && getRand() < P_BOUNCE) {
+                break;
+            }
+            if(max(throughput.r, max(throughput.g, throughput.b)) < 0.001f) {
+                break;
+            }
             continue;
         }
 

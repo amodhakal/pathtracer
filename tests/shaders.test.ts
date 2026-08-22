@@ -23,4 +23,12 @@ describe("shader sources", () => {
     expect(source.trim().length).toBeGreaterThan(0);
     expect(source).toContain("main");
   });
+
+  it("declares the issue #55 material types in the shared chunks", () => {
+    const common = readFileSync(join(shaderDir, "chunks/common.glsl"), "utf8");
+    expect(common).toContain("#define MATERIAL_GGX 3");
+    expect(common).toContain("#define MATERIAL_EMISSIVE 4");
+    expect(common).toContain("#define MATERIAL_CLEARCOAT 5");
+    expect(common).toContain("#define MATERIAL_THINFILM 6");
+  });
 });
