@@ -12,6 +12,11 @@ precision highp float;
 #define SHININESS 32.0
 #define SPECULAR 0.3
 
+// Material encoding packed as vec3(x = material type, y = IOR, z = opacity)
+#define MATERIAL_DIFFUSE 0
+#define MATERIAL_MIRROR 1
+#define MATERIAL_GLASS 2
+
 struct Light {
     vec3 position;
     vec3 color;
@@ -169,15 +174,23 @@ QuadResult solveQuad(vec3 quads) {
     float b = quads.y;
     float c = quads.z;
 
-    float discriminant = b * b - 4.0f * a * c;
+    // Numerically stable quadratic solve (half-b form).
+    float halfB = 0.5f * b;
+    float discriminant = halfB * halfB - a * c;
 
     if(discriminant < 0.0f) {
         return QuadResult(0, vec2(0.0f));
     }
 
     float sqrtDiscriminant = sqrt(discriminant);
-    float term1 = (-b + sqrtDiscriminant) / (2.0f * a);
-    float term2 = (-b - sqrtDiscriminant) / (2.0f * a);
+
+    // Compute one root using the sign that avoids cancellation
+    // (larger magnitude), then derive the other from it.
+    float q = (halfB > 0.0f)
+        ? -(halfB + sqrtDiscriminant)
+        : -(halfB - sqrtDiscriminant);
+    float term1 = q / a;
+    float term2 = c / q;
 
     if(term1 < term2) {
         return QuadResult(2, vec2(term1, term2));

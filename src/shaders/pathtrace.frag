@@ -12,6 +12,11 @@ precision highp float;
 #define CLIP_VAL 0.00001
 #define SHADOW_CLIP 0.001
 
+// Material encoding packed as vec3(x = material type, y = IOR, z = opacity)
+#define MATERIAL_DIFFUSE 0
+#define MATERIAL_MIRROR 1
+#define MATERIAL_GLASS 2
+
 struct Light {
     vec3 position;
     vec3 color;
@@ -66,7 +71,7 @@ vec3 calculateDirectIllumination(vec3 point, vec3 normal, vec3 color);
 vec3 sampleBounceDirection(vec3 normal);
 Intersect calculateRayEllipsoidIntersect(vec3 point, vec3 direction, Ellipsoid ellipsoid);
 Intersect calculateRayTriangleIntersect(vec3 point, vec3 direction, Triangle triangle);
-Intersect findClosestIntersect(vec3 point, vec3 direction, bool skipFront);
+Intersect findClosestIntersect(vec3 point, vec3 direction);
 QuadResult solveQuad(vec3 quads);
 bool isEmitter(float r, float g, float b);
 float fresnelSchlick(float cosTheta, float ior);
@@ -163,8 +168,20 @@ vec3 calculateDirectIllumination(vec3 point, vec3 normal, vec3 color) {
         }
 
         float ndotl = max(dot(normal, lightDirection), 0.0);
-        float G = ndotl / (1.0f + lightDistance * lightDistance);
-        accumulated += u_Light.color * color * G;
+        float cosLight = max(dot(lightNormal, -lightDirection), 0.0);
+
+        // Area-to-area geometry term for uniform area sampling:
+        // Lo = Le * brdf * cos(theta_i) * cos(theta_l) * V / (r^2 * pdf)
+        // pdf = 1 / lightArea for uniform sampling over the quad.
+        if(ndotl <= 0.0 || cosLight <= 0.0) {
+            continue;
+        }
+
+        float lightArea = 4.0f * u_Light.size.x * u_Light.size.y;
+        float pdf = 1.0f / max(lightArea, CLIP_VAL);
+        float geometryTerm = ndotl * cosLight
+            / max(lightDistance * lightDistance, CLIP_VAL);
+        accumulated += u_Light.color * color * geometryTerm / pdf;
     }
 
     return accumulated / float(LIGHT_SAMPLES);
@@ -175,8 +192,8 @@ vec3 sampleBounceDirection(vec3 normal) {
     vec3 tangent = normalize(cross(basis, normal));
     vec3 bitangent = cross(normal, tangent);
 
-    const int MAX_ITERS = 64;
-    vec3 result = normal;
+    const int MAX_ITERS = 32;
+    vec3 result = normalize(tangent + bitangent + normal);
     for(int i = 0; i < MAX_ITERS; i++) {
         float x = getRand() * 2.0f - 1.0f;
         float y = getRand() * 2.0f - 1.0f;
@@ -259,7 +276,7 @@ Intersect calculateRayTriangleIntersect(vec3 point, vec3 direction, Triangle tri
     return Intersect(true, term, intersect, triangle.color, triangle.normal, vec3(0.0f));
 }
 
-Intersect findClosestIntersect(vec3 point, vec3 direction, bool skipFront) {
+Intersect findClosestIntersect(vec3 point, vec3 direction) {
     Intersect closestIntersect = Intersect(false, 0.0f, vec3(0.0f), vec3(0.0f), vec3(0.0f), vec3(0.0f));
     float closestDistance = 1e20f;
 
@@ -270,13 +287,6 @@ Intersect findClosestIntersect(vec3 point, vec3 direction, bool skipFront) {
         triangle.vertex3 = u_Triangles[i * TRIANGLE_VECTORS + 2];
         triangle.normal = u_Triangles[i * TRIANGLE_VECTORS + 3];
         triangle.color = u_Triangles[i * TRIANGLE_VECTORS + 4];
-
-        if(skipFront
-            && abs(triangle.vertex1.z) < 0.001f
-            && abs(triangle.vertex2.z) < 0.001f
-            && abs(triangle.vertex3.z) < 0.001f) {
-            continue;
-        }
 
         Intersect intersect = calculateRayTriangleIntersect(point, direction, triangle);
         if(intersect.isExisting && intersect.distance < closestDistance) {
@@ -307,15 +317,23 @@ QuadResult solveQuad(vec3 quads) {
     float b = quads.y;
     float c = quads.z;
 
-    float discriminant = b * b - 4.0f * a * c;
+    // Numerically stable quadratic solve (half-b form).
+    float halfB = 0.5f * b;
+    float discriminant = halfB * halfB - a * c;
 
     if(discriminant < 0.0f) {
         return QuadResult(0, vec2(0.0f));
     }
 
     float sqrtDiscriminant = sqrt(discriminant);
-    float term1 = (-b + sqrtDiscriminant) / (2.0f * a);
-    float term2 = (-b - sqrtDiscriminant) / (2.0f * a);
+
+    // Compute one root using the sign that avoids cancellation
+    // (larger magnitude), then derive the other from it.
+    float q = (halfB > 0.0f)
+        ? -(halfB + sqrtDiscriminant)
+        : -(halfB - sqrtDiscriminant);
+    float term1 = q / a;
+    float term2 = c / q;
 
     if(term1 < term2) {
         return QuadResult(2, vec2(term1, term2));
@@ -331,7 +349,7 @@ vec3 tracePath(vec3 startPoint, vec3 startDirection) {
     vec3 throughput = vec3(1.0f);
 
     for(int depth = 0; depth < MAX_BOUNCES; depth++) {
-        Intersect hit = findClosestIntersect(point, direction, depth == 0);
+        Intersect hit = findClosestIntersect(point, direction);
 
         if(!hit.isExisting) {
             break;
@@ -344,7 +362,7 @@ vec3 tracePath(vec3 startPoint, vec3 startDirection) {
 
         int materialType = int(hit.material.x + 0.5f);
 
-        if(materialType == 1) {
+        if(materialType == MATERIAL_MIRROR) {
             direction = calculateReflection(direction, hit.normal);
             point = hit.intersect + hit.normal * CLIP_VAL;
             throughput *= hit.color;
@@ -356,34 +374,30 @@ vec3 tracePath(vec3 startPoint, vec3 startDirection) {
             continue;
         }
 
-        if(materialType == 2) {
+        if(materialType == MATERIAL_GLASS) {
             float opacity = hit.material.z;
 
-            if(getRand() >= opacity) {
-                accumulated += throughput * calculateDirectIllumination(hit.intersect, hit.normal, hit.color);
+            vec3 refracted = calculateRefraction(direction, hit.normal, hit.material.y);
+            vec3 reflected = calculateReflection(direction, hit.normal);
 
-                vec3 refracted = calculateRefraction(direction, hit.normal, hit.material.y);
-                vec3 reflected = calculateReflection(direction, hit.normal);
+            float cosTheta = abs(dot(hit.normal, direction));
+            float fresnel = fresnelSchlick(cosTheta, hit.material.y);
 
-                float cosTheta = abs(dot(hit.normal, direction));
-                float fresnel = fresnelSchlick(cosTheta, hit.material.y);
+            bool isReflecting = refracted == vec3(0.0f) || getRand() < fresnel;
+            direction = isReflecting ? reflected : refracted;
+            vec3 travelSide = dot(direction, hit.normal) < 0.0f ? -hit.normal : hit.normal;
+            point = hit.intersect + travelSide * CLIP_VAL;
+            throughput *= mix(vec3(1.0f), hit.color, opacity);
 
-                bool isReflecting = refracted == vec3(0.0f) || getRand() < fresnel;
-                direction = isReflecting ? reflected : refracted;
-                vec3 travelSide = dot(direction, hit.normal) < 0.0f ? -hit.normal : hit.normal;
-                point = hit.intersect + travelSide * CLIP_VAL;
-                throughput *= mix(vec3(1.0f), hit.color, opacity);
-
-                if(depth > 1 && getRand() < P_BOUNCE) {
-                    break;
-                }
-
-                if(max(throughput.r, max(throughput.g, throughput.b)) < 0.001f) {
-                    break;
-                }
-
-                continue;
+            if(depth > 1 && getRand() < P_BOUNCE) {
+                break;
             }
+
+            if(max(throughput.r, max(throughput.g, throughput.b)) < 0.001f) {
+                break;
+            }
+
+            continue;
         }
 
         accumulated += throughput * calculateDirectIllumination(hit.intersect, hit.normal, hit.color);

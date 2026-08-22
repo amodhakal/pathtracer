@@ -4,7 +4,7 @@ import localFragCode from "./shaders/local.frag";
 import displayFragCode from "./shaders/display.frag";
 import noiseGenFragCode from "./shaders/noiseGen.frag";
 import { createProgram, createShader } from "./utils";
-import { vertices, flattenedTriangles, flattenedEllipsoids, light } from "./constants";
+import { vertices, flattenedTriangles, flattenedEllipsoids, light, eye } from "./constants";
 
 // Issue #25: path tracing is the default mode on startup. This overrides the
 // stale IS_PATHTRACING export in constants.ts (which defaults to false).
@@ -215,8 +215,10 @@ try {
     gl.enableVertexAttribArray(posLocNoise);
     gl.vertexAttribPointer(posLocNoise, 2, gl.FLOAT, false, 0, 0);
 
-    const currentSeed = Math.random() * 100000.0;
-    gl.uniform1f(noiseUniforms.u_Seed, currentSeed);
+    // Issue #4 / #96: deterministic per-run seed that varies per accumulated
+    // frame so Monte-Carlo samples decorrelate while runs stay reproducible.
+    const FIXED_NOISE_SEED = 19700101.0;
+    gl.uniform1f(noiseUniforms.u_Seed, FIXED_NOISE_SEED + frameCount);
     gl.uniform2f(noiseUniforms.u_Resolution, textureWidth, textureHeight);
 
     gl.drawArrays(gl.TRIANGLES, 0, 6);
@@ -241,7 +243,7 @@ try {
     gl.bindTexture(gl.TEXTURE_2D, readTex);
     gl.uniform1i(pathtraceUniforms.u_AccumTexture, 1);
 
-    gl.uniform3fv(pathtraceUniforms.u_Eye, new Float32Array([0.5, 0.5, -0.4]));
+    gl.uniform3fv(pathtraceUniforms.u_Eye, eye);
     gl.uniform3fv(pathtraceUniforms.u_Light.position, light.position);
     gl.uniform3fv(pathtraceUniforms.u_Light.color, light.color);
     gl.uniform3fv(pathtraceUniforms.u_Light.normal, light.normal);
@@ -280,7 +282,7 @@ try {
     gl.enableVertexAttribArray(posLocLocal);
     gl.vertexAttribPointer(posLocLocal, 2, gl.FLOAT, false, 0, 0);
 
-    gl.uniform3fv(localUniforms.u_Eye, new Float32Array([0.5, 0.5, -0.4]));
+    gl.uniform3fv(localUniforms.u_Eye, eye);
     gl.uniform3fv(localUniforms.u_Light.position, light.position);
     gl.uniform3fv(localUniforms.u_Light.color, light.color);
     gl.uniform3fv(localUniforms.u_Light.normal, light.normal);
@@ -313,6 +315,7 @@ try {
         requestAnimationFrame(render);
       } else {
         renderLoopActive = false;
+        console.log(`Rendering complete after ${FRAME_COUNT} frames`);
       }
     } else {
       renderLocal();
@@ -325,10 +328,25 @@ try {
     requestAnimationFrame(render);
   }
 
+  /**
+   * Internal render resolution scale relative to the canvas's CSS size.
+   *
+   * The framebuffer is sized as clientWidth/Height * RENDER_SCALE while the
+   * canvas element stays at its full CSS size (the browser upsamples the
+   * drawing buffer). On HiDPI ("retina") displays devicePixelRatio can be 2+
+   * which would multiply the fragment cost by 4x or more for little visible
+   * benefit in a path tracer — clamping to min(devicePixelRatio, 1) renders
+   * at most 1 device pixel per pixel.
+   *
+   * Single source of truth for render scaling: a future UI control
+   * (e.g. issue #59's render-scale slider) should replace/update this
+   * constant rather than introducing a parallel factor.
+   */
+  const RENDER_SCALE = Math.min(window.devicePixelRatio || 1, 1);
+
   function resizeCanvas() {
-    const dpr = window.devicePixelRatio || 1;
-    const width = Math.max(1, Math.round(canvas.clientWidth * dpr));
-    const height = Math.max(1, Math.round(canvas.clientHeight * dpr));
+    const width = Math.max(1, Math.round(canvas.clientWidth * RENDER_SCALE));
+    const height = Math.max(1, Math.round(canvas.clientHeight * RENDER_SCALE));
 
     if (canvas.width === width && canvas.height === height) return;
 
