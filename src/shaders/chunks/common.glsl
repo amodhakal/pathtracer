@@ -38,18 +38,17 @@
 // and local.frag. `ndc` is the window position in [-1, 1]² (+y up); the
 // horizontal extent scales by the aspect ratio instead of stretching the
 // scene on non-square canvases.
-vec3 generateCameraRay(vec2 ndc, vec2 resolution, vec3 eye) {
+//
+// Issue #52: interactive orbit/pan/zoom camera. The camera basis (forward/
+// right/up) is computed on the CPU from the orbit state in src/camera.ts and
+// uploaded as u_CamForward/u_CamRight/u_CamUp uniforms by the Renderer.
+vec3 generateCameraRay(vec2 ndc, vec2 resolution, vec3 eye,
+                       vec3 camForward, vec3 camRight, vec3 camUp) {
     float aspect = resolution.x / resolution.y;
     float tanHalfFov = tan(radians(CAMERA_VERTICAL_FOV_DEG) * 0.5f);
 
-    // Camera looks down +Z with world axes as its basis (matches the fixed
-    // eye orientation used by this scene).
-    vec3 forward = vec3(0.0f, 0.0f, 1.0f);
-    vec3 right   = vec3(1.0f, 0.0f, 0.0f);
-    vec3 up      = vec3(0.0f, 1.0f, 0.0f);
-
     vec2 offset = ndc * vec2(tanHalfFov * aspect, tanHalfFov);
-    return normalize(forward + right * offset.x + up * offset.y);
+    return normalize(camForward + camRight * offset.x + camUp * offset.y);
 }
 
 struct Light {

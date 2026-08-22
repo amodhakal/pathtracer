@@ -71,7 +71,8 @@ describe("constants / scene data", () => {
     ];
     for (let i = 0; i < NUM_ELLIPSOIDS; i++) {
       const type = flattenedEllipsoids[i * ELLIPSOID_VEC_VALUE_COUNT + 9];
-      expect(type).oneOf(known);
+      // vitest 4 removed expect().oneOf; use toContain on the known set.
+      expect(known).toContain(type);
     }
   });
 

@@ -14,6 +14,10 @@ precision highp float;
 // accumulated, so rare high-energy spikes (fireflies) can't dominate the
 // running average. Applied per-sample in main(), not per-bounce.
 #define FIREFLY_CLAMP 10.0
+// Issue #62: spectral dispersion strength for glass. The per-channel IOR is
+// offset from the material's base IOR by +- this fraction of (ior - 1.0),
+// so blue bends more than red and paths split into rainbow fringes.
+#define GLASS_DISPERSION 0.06
 
 // Issue #55: emissive material strength (radiance multiplier for MATERIAL_EMISSIVE)
 #define EMISSIVE_STRENGTH 4.0
@@ -35,6 +39,10 @@ in vec2 v_WindowPixels;
 out vec4 outColor;
 
 uniform vec3 u_Eye;
+// Issue #52: orbit/pan/zoom camera basis (see src/camera.ts).
+uniform vec3 u_CamForward;
+uniform vec3 u_CamRight;
+uniform vec3 u_CamUp;
 uniform Light u_Light;
 uniform vec3 u_Ellipsoids[ELLIPSOID_COUNT * ELLIPSOID_VECTORS];
 uniform vec3 u_Triangles[TRIANGLE_COUNT * TRIANGLE_VECTORS];
@@ -131,6 +139,17 @@ float fresnelSchlick(float cosTheta, float ior) {
 
 vec3 calculateReflection(vec3 incident, vec3 faceNormal) {
     return incident - 2.0f * dot(faceNormal, incident) * faceNormal;
+}
+
+// Issue #62: spectral dispersion. Pick one RGB channel stochastically and
+// offset the base IOR for it — blue bends more, red less. Over accumulated
+// samples this splits refraction into rainbow fringes like a prism.
+float sampleDispersiveIor(float baseIor) {
+    float channel = getRand() * 3.0f;
+    // Offsets in units of (baseIor - 1.0) so dispersion scales with the
+    // material's own refractivity: R -1/3, G 0, B +1/3 of GLASS_DISPERSION.
+    float offset = (floor(channel) - 1.0f) * (2.0f / 3.0f) * GLASS_DISPERSION;
+    return max(baseIor + offset * (baseIor - 1.0f), 1.0f);
 }
 
 vec3 calculateRefraction(vec3 incident, vec3 faceNormal, float ior, out bool isTIR) {
@@ -537,8 +556,13 @@ vec3 tracePath(vec3 startPoint, vec3 startDirection) {
             // TIR handled) instead of the Schlick-based lobe hack.
             vec3 newDirection;
             vec3 lobeWeight;
+            // Issue #62: sample a per-channel dispersive IOR so refraction (and
+            // its Fresnel weight) varies with wavelength. Reflection stays
+            // achromatic; only the refracted path disperses.
+            float baseIor = hit.material.y;
+            float ior = sampleDispersiveIor(baseIor);
             bool survived = sampleGlassBsdf(direction, hit.normal, hit.color,
-                hit.material.y, hit.material.z, newDirection, lobeWeight);
+                ior, hit.material.z, newDirection, lobeWeight);
 
             direction = newDirection;
             suppressEnvHit = false; // specular chain: env hits stay enabled
@@ -704,8 +728,13 @@ void main() {
     // from a random point on the aperture disk through that same focal point.
     // Averaged over accumulated frames this converges to the thin-lens circle-
     // of-confusion blur, and the per-frame jitter keeps it noise-free over time.
+    // Issue #52: the camera basis comes from the interactive orbit/pan/zoom
+    // state (u_CamForward/u_CamRight/u_CamUp uniforms, see src/camera.ts).
     vec3 rayOrigin = u_Eye;
-    vec3 rayDirection = generateCameraRay(v_WindowPixels.xy + jitter, u_Resolution, u_Eye);
+    vec3 centerRayDirection = generateCameraRay(vec2(0.0f), u_Resolution, u_Eye,
+                                                u_CamForward, u_CamRight, u_CamUp);
+    vec3 rayDirection = generateCameraRay(v_WindowPixels.xy + jitter, u_Resolution, u_Eye,
+                                          u_CamForward, u_CamRight, u_CamUp);
 
     // Issue #58: thin-lens depth of field, composed with the issue #12 sub-pixel
     // jitter and the issue #21 FOV camera model. The pinhole ray defines where the
@@ -713,7 +742,7 @@ void main() {
     // aperture disk through that same focal point. Averaged over accumulated frames
     // this converges to the thin-lens circle-of-confusion blur.
     if(u_ApertureRadius > 0.0f) {
-        float focalT = u_FocalDistance / dot(rayDirection, normalize(generateCameraRay(vec2(0.0f), u_Resolution, u_Eye)));
+        float focalT = u_FocalDistance / dot(rayDirection, normalize(centerRayDirection));
         vec3 focalPoint = u_Eye + focalT * rayDirection;
 
         // Uniform disk sample (rejection-free): r = sqrt(u1), phi = 2*PI*u2.
