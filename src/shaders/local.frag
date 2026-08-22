@@ -11,6 +11,10 @@ in vec2 v_WindowPixels;
 out vec4 outColor;
 
 uniform vec3 u_Eye;
+// Issue #52: orbit/pan/zoom camera basis (see src/camera.ts).
+uniform vec3 u_CamForward;
+uniform vec3 u_CamRight;
+uniform vec3 u_CamUp;
 uniform Light u_Light;
 uniform vec3 u_Ellipsoids[ELLIPSOID_COUNT * ELLIPSOID_VECTORS];
 uniform vec3 u_Triangles[TRIANGLE_COUNT * TRIANGLE_VECTORS];
@@ -20,8 +24,11 @@ uniform vec2 u_Resolution;
 
 void main() {
     // Issue #21: aspect ratio handled by the shared FOV camera model.
+    // Issue #52: camera basis comes from the interactive orbit/pan/zoom
+    // state (u_CamForward/u_CamRight/u_CamUp uniforms, see src/camera.ts).
     vec3 rayOrigin = u_Eye;
-    vec3 rayDirection = generateCameraRay(v_WindowPixels.xy, u_Resolution, u_Eye);
+    vec3 rayDirection = generateCameraRay(v_WindowPixels.xy, u_Resolution, u_Eye,
+                                          u_CamForward, u_CamRight, u_CamUp);
 
     Intersect hit = findClosestIntersect(rayOrigin, rayDirection);
 

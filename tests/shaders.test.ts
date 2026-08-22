@@ -37,6 +37,7 @@ describe("shader sources", () => {
     expect(source).toContain("#include <prng>");
     expect(source).toContain("initRng(");
     expect(source).not.toContain("u_NoiseTexture");
+  });
 
   it("samples glass with a proper dielectric BSDF and MIS contract (#32)", () => {
     const pathtrace = readFileSync(join(shaderDir, "pathtrace.frag"), "utf8");

@@ -35,6 +35,10 @@ in vec2 v_WindowPixels;
 out vec4 outColor;
 
 uniform vec3 u_Eye;
+// Issue #52: orbit/pan/zoom camera basis (see src/camera.ts).
+uniform vec3 u_CamForward;
+uniform vec3 u_CamRight;
+uniform vec3 u_CamUp;
 uniform Light u_Light;
 uniform vec3 u_Ellipsoids[ELLIPSOID_COUNT * ELLIPSOID_VECTORS];
 uniform vec3 u_Triangles[TRIANGLE_COUNT * TRIANGLE_VECTORS];
@@ -704,8 +708,13 @@ void main() {
     // from a random point on the aperture disk through that same focal point.
     // Averaged over accumulated frames this converges to the thin-lens circle-
     // of-confusion blur, and the per-frame jitter keeps it noise-free over time.
+    // Issue #52: the camera basis comes from the interactive orbit/pan/zoom
+    // state (u_CamForward/u_CamRight/u_CamUp uniforms, see src/camera.ts).
     vec3 rayOrigin = u_Eye;
-    vec3 rayDirection = generateCameraRay(v_WindowPixels.xy + jitter, u_Resolution, u_Eye);
+    vec3 centerRayDirection = generateCameraRay(vec2(0.0f), u_Resolution, u_Eye,
+                                                u_CamForward, u_CamRight, u_CamUp);
+    vec3 rayDirection = generateCameraRay(v_WindowPixels.xy + jitter, u_Resolution, u_Eye,
+                                          u_CamForward, u_CamRight, u_CamUp);
 
     // Issue #58: thin-lens depth of field, composed with the issue #12 sub-pixel
     // jitter and the issue #21 FOV camera model. The pinhole ray defines where the
@@ -713,7 +722,7 @@ void main() {
     // aperture disk through that same focal point. Averaged over accumulated frames
     // this converges to the thin-lens circle-of-confusion blur.
     if(u_ApertureRadius > 0.0f) {
-        float focalT = u_FocalDistance / dot(rayDirection, normalize(generateCameraRay(vec2(0.0f), u_Resolution, u_Eye)));
+        float focalT = u_FocalDistance / dot(rayDirection, normalize(centerRayDirection));
         vec3 focalPoint = u_Eye + focalT * rayDirection;
 
         // Uniform disk sample (rejection-free): r = sqrt(u1), phi = 2*PI*u2.

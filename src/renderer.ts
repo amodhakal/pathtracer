@@ -11,6 +11,14 @@ import {
   APERTURE_RADIUS,
   FOCAL_DISTANCE,
 } from "./constants";
+import {
+  computeCameraBasis,
+  makeInitialCameraState,
+  orbit,
+  pan,
+  zoom,
+  type CameraState,
+} from "./camera";
 import type { Programs } from "./programs";
 import type { QuadGeometry } from "./geometry";
 import { createRenderTargets, destroyRenderTargets, type RenderTargets } from "./framebuffers";
@@ -62,6 +70,15 @@ export class Renderer {
   private renderLoopActive = false;
   private resizeObserver: ResizeObserver;
 
+  // Issue #52: interactive camera state + active drag info.
+  private cameraState!: CameraState;
+  private dragState: {
+    pointerId: number;
+    lastX: number;
+    lastY: number;
+    button: number;
+  } | null = null;
+
   constructor(
     canvas: HTMLCanvasElement,
     gl: WebGL2RenderingContext,
@@ -76,6 +93,10 @@ export class Renderer {
     // Issue #39: uniform locations are resolved here, next to the programs.
     const pathtraceUniforms = {
       u_Eye: gl.getUniformLocation(programs.pathtrace, "u_Eye")!,
+      // Issue #52: orbit/pan/zoom camera basis uniforms (see camera.ts).
+      u_CamForward: gl.getUniformLocation(programs.pathtrace, "u_CamForward")!,
+      u_CamRight: gl.getUniformLocation(programs.pathtrace, "u_CamRight")!,
+      u_CamUp: gl.getUniformLocation(programs.pathtrace, "u_CamUp")!,
       u_Light: getLightUniforms(gl, programs.pathtrace),
       u_Ellipsoids: gl.getUniformLocation(programs.pathtrace, "u_Ellipsoids")!,
       u_Triangles: gl.getUniformLocation(programs.pathtrace, "u_Triangles")!,
@@ -91,6 +112,10 @@ export class Renderer {
     };
     const localUniforms = {
       u_Eye: gl.getUniformLocation(programs.local, "u_Eye")!,
+      // Issue #52: orbit/pan/zoom camera basis uniforms (see camera.ts).
+      u_CamForward: gl.getUniformLocation(programs.local, "u_CamForward")!,
+      u_CamRight: gl.getUniformLocation(programs.local, "u_CamRight")!,
+      u_CamUp: gl.getUniformLocation(programs.local, "u_CamUp")!,
       u_Light: getLightUniforms(gl, programs.local),
       u_Ellipsoids: gl.getUniformLocation(programs.local, "u_Ellipsoids")!,
       u_Triangles: gl.getUniformLocation(programs.local, "u_Triangles")!,
@@ -105,12 +130,55 @@ export class Renderer {
     };
     this.uniforms = { pathtraceUniforms, localUniforms, displayUniforms };
 
+    // Issue #52: interactive orbit/pan/zoom camera. The CameraState is owned
+    // here; the computed eye + basis vectors are uploaded as uniforms whenever
+    // the camera moves and accumulation is reset so stale frames are dropped.
+    this.cameraState = makeInitialCameraState(eye);
+    canvas.addEventListener("pointerdown", (e) => {
+      canvas.setPointerCapture(e.pointerId);
+      this.dragState = { pointerId: e.pointerId, lastX: e.clientX, lastY: e.clientY, button: e.button };
+      e.preventDefault();
+    });
+    canvas.addEventListener("pointermove", (e) => {
+      const drag = this.dragState;
+      if (!drag || drag.pointerId !== e.pointerId) return;
+      const dx = e.clientX - drag.lastX;
+      const dy = e.clientY - drag.lastY;
+      drag.lastX = e.clientX;
+      drag.lastY = e.clientY;
+
+      if (drag.button === 2) {
+        // Right-drag pans the target in the screen plane.
+        pan(this.cameraState, computeCameraBasis(this.cameraState), dx, -dy, canvas.clientHeight);
+      } else {
+        // Left-drag orbits around the target.
+        orbit(this.cameraState, dx, -dy);
+      }
+      this.onCameraMoved();
+    });
+    const endDrag = (e: PointerEvent) => {
+      if (this.dragState?.pointerId === e.pointerId) this.dragState = null;
+    };
+    canvas.addEventListener("pointerup", endDrag);
+    canvas.addEventListener("pointercancel", endDrag);
+    // Block the context menu so right-drag panning works.
+    canvas.addEventListener("contextmenu", (e) => e.preventDefault());
+    canvas.addEventListener(
+      "wheel",
+      (e) => {
+        e.preventDefault();
+        zoom(this.cameraState, e.deltaY);
+        this.onCameraMoved();
+      },
+      { passive: false },
+    );
+    this.uploadCameraUniforms();
+
     // Issue #41: static uniforms (scene data + sampler bindings) are uploaded
     // once at init instead of every frame. Only truly per-frame values (seed,
     // frameCount, resolution) are uploaded in the render functions.
     const p = this.uniforms.pathtraceUniforms;
     gl.useProgram(programs.pathtrace);
-    gl.uniform3fv(p.u_Eye, eye);
     gl.uniform3fv(p.u_Light.position, light.position);
     gl.uniform3fv(p.u_Light.color, light.color);
     gl.uniform3fv(p.u_Light.normal, light.normal);
@@ -129,7 +197,6 @@ export class Renderer {
 
     gl.useProgram(programs.local);
     const l = this.uniforms.localUniforms;
-    gl.uniform3fv(l.u_Eye, eye);
     gl.uniform3fv(l.u_Light.position, light.position);
     gl.uniform3fv(l.u_Light.color, light.color);
     gl.uniform3fv(l.u_Light.normal, light.normal);
@@ -150,6 +217,10 @@ export class Renderer {
   private uniforms: {
     pathtraceUniforms: {
       u_Eye: WebGLUniformLocation;
+      // Issue #52: orbit/pan/zoom camera basis.
+      u_CamForward: WebGLUniformLocation;
+      u_CamRight: WebGLUniformLocation;
+      u_CamUp: WebGLUniformLocation;
       u_Light: { position: WebGLUniformLocation; color: WebGLUniformLocation; normal: WebGLUniformLocation; size: WebGLUniformLocation };
       u_Ellipsoids: WebGLUniformLocation;
       u_Triangles: WebGLUniformLocation;
@@ -162,6 +233,10 @@ export class Renderer {
     };
     localUniforms: {
       u_Eye: WebGLUniformLocation;
+      // Issue #52: orbit/pan/zoom camera basis.
+      u_CamForward: WebGLUniformLocation;
+      u_CamRight: WebGLUniformLocation;
+      u_CamUp: WebGLUniformLocation;
       u_Light: { position: WebGLUniformLocation; color: WebGLUniformLocation; normal: WebGLUniformLocation; size: WebGLUniformLocation };
       u_Ellipsoids: WebGLUniformLocation;
       u_Triangles: WebGLUniformLocation;
@@ -169,6 +244,37 @@ export class Renderer {
     };
     displayUniforms: { u_AccumTexture: WebGLUniformLocation; u_FrameCount: WebGLUniformLocation };
   };
+
+  /**
+   * Issue #52: upload the current camera eye + basis vectors as uniforms for
+   * the pathtrace and local programs. Called at init and on every camera move.
+   */
+  private uploadCameraUniforms(): void {
+    const { gl } = this;
+    const basis = computeCameraBasis(this.cameraState);
+    const { eye: eyePos, forward, right, up } = basis;
+
+    gl.useProgram(this.programs.pathtrace);
+    const p = this.uniforms.pathtraceUniforms;
+    gl.uniform3fv(p.u_Eye, eyePos);
+    gl.uniform3fv(p.u_CamForward, forward);
+    gl.uniform3fv(p.u_CamRight, right);
+    gl.uniform3fv(p.u_CamUp, up);
+
+    gl.useProgram(this.programs.local);
+    const l = this.uniforms.localUniforms;
+    gl.uniform3fv(l.u_Eye, eyePos);
+    gl.uniform3fv(l.u_CamForward, forward);
+    gl.uniform3fv(l.u_CamRight, right);
+    gl.uniform3fv(l.u_CamUp, up);
+  }
+
+  /** Issue #52: reset accumulation and restart the render loop after a camera move. */
+  private onCameraMoved(): void {
+    this.uploadCameraUniforms();
+    this.frameCount = 0;
+    this.startRenderLoop();
+  }
 
   /** Rebuild FBOs at a new size and reset accumulation. */
   private setupFramebuffers(width: number, height: number): void {
