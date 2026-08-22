@@ -28,14 +28,18 @@ Intersect calculateRayEllipsoidIntersect(vec3 point, vec3 direction, Ellipsoid e
         vec3 normal = intersect - ellipsoid.center;
         normal /= ellipsoid.radius * ellipsoid.radius;
         normal = normalize(normal);
-        return Intersect(true, term, intersect, ellipsoid.color, normal, ellipsoid.material);
+        // Issue #57: ellipsoids have no UV mapping yet; report no textures.
+        return Intersect(true, term, intersect, ellipsoid.color, normal,
+            ellipsoid.material, vec2(0.0f), vec2(-1.0f));
     }
 
-    return Intersect(false, 0.0f, vec3(0.0f), vec3(0.0f), vec3(0.0f), vec3(0.0f));
+    return Intersect(false, 0.0f, vec3(0.0f), vec3(0.0f), vec3(0.0f),
+        vec3(0.0f), vec2(0.0f), vec2(-1.0f));
 }
 
 Intersect calculateRayTriangleIntersect(vec3 point, vec3 direction, Triangle triangle) {
-    Intersect noIntersection = Intersect(false, 0.0f, vec3(0.0f), vec3(0.0f), vec3(0.0f), vec3(0.0f));
+    Intersect noIntersection = Intersect(false, 0.0f, vec3(0.0f), vec3(0.0f), vec3(0.0f),
+        vec3(0.0f), vec2(0.0f), vec2(-1.0f));
 
     vec3 triangleEdge1 = triangle.vertex2 - triangle.vertex1;
     vec3 triangleEdge2 = triangle.vertex3 - triangle.vertex1;
@@ -66,7 +70,60 @@ Intersect calculateRayTriangleIntersect(vec3 point, vec3 direction, Triangle tri
     }
 
     vec3 intersect = point + direction * term;
-    return Intersect(true, term, intersect, triangle.color, triangle.normal, vec3(0.0f));
+
+    // Issue #57: barycentric UV interpolation. The Möller–Trumbore weights
+    // (uValue, vValue, 1 - u - v) are exactly the barycentric coordinates of
+    // the hit point, so reuse them to blend the per-vertex texture coords.
+    vec2 uv = triangle.uv1
+        + uValue * (triangle.uv2 - triangle.uv1)
+        + vValue * (triangle.uv3 - triangle.uv1);
+
+    return Intersect(true, term, intersect, triangle.color, triangle.normal,
+        vec3(0.0f), uv, triangle.textures);
+}
+
+// Restores findClosestIntersect, which was dropped from this chunk during the
+// issue #37 refactor but is still called by pathtrace.frag and local.frag.
+Intersect findClosestIntersect(vec3 point, vec3 direction) {
+    Intersect closestIntersect = Intersect(false, 0.0f, vec3(0.0f), vec3(0.0f),
+        vec3(0.0f), vec3(0.0f), vec2(0.0f), vec2(-1.0f));
+    float closestDistance = 1e20f;
+
+    for(int i = 0; i < TRIANGLE_COUNT; i++) {
+        Triangle triangle;
+        triangle.vertex1 = u_Triangles[i * TRIANGLE_VECTORS];
+        triangle.vertex2 = u_Triangles[i * TRIANGLE_VECTORS + 1];
+        triangle.vertex3 = u_Triangles[i * TRIANGLE_VECTORS + 2];
+        triangle.normal = u_Triangles[i * TRIANGLE_VECTORS + 3];
+        triangle.color = u_Triangles[i * TRIANGLE_VECTORS + 4];
+        // Issue #57: two packed UV slots and one packed texture-id slot.
+        triangle.uv1 = u_Triangles[i * TRIANGLE_VECTORS + 5].xy;
+        triangle.uv2 = u_Triangles[i * TRIANGLE_VECTORS + 5].zw;
+        triangle.uv3 = u_Triangles[i * TRIANGLE_VECTORS + 6].xy;
+        triangle.textures = u_Triangles[i * TRIANGLE_VECTORS + 6].zw;
+
+        Intersect intersect = calculateRayTriangleIntersect(point, direction, triangle);
+        if(intersect.isExisting && intersect.distance < closestDistance) {
+            closestIntersect = intersect;
+            closestDistance = intersect.distance;
+        }
+    }
+
+    for(int i = 0; i < ELLIPSOID_COUNT; i++) {
+        Ellipsoid ellipsoid;
+        ellipsoid.center = u_Ellipsoids[i * ELLIPSOID_VECTORS];
+        ellipsoid.radius = u_Ellipsoids[i * ELLIPSOID_VECTORS + 1];
+        ellipsoid.color = u_Ellipsoids[i * ELLIPSOID_VECTORS + 2];
+        ellipsoid.material = u_Ellipsoids[i * ELLIPSOID_VECTORS + 3];
+
+        Intersect intersect = calculateRayEllipsoidIntersect(point, direction, ellipsoid);
+        if(intersect.isExisting && intersect.distance < closestDistance) {
+            closestIntersect = intersect;
+            closestDistance = intersect.distance;
+        }
+    }
+
+    return closestIntersect;
 }
 
 // Issue #49: occlusion-only ("any-hit") variants for shadow rays. Shadow

@@ -6,7 +6,8 @@
 #define ELLIPSOID_COUNT 7
 #define ELLIPSOID_VECTORS 4
 #define TRIANGLE_COUNT 14
-#define TRIANGLE_VECTORS 5
+// Issue #57: 3 vertices + normal + color + 2 packed UV slots + texture id.
+#define TRIANGLE_VECTORS 8
 #define CLIP_VAL 0.00001
 
 // Material encoding packed as vec3(x = material type, y = IOR, z = opacity)
@@ -47,6 +48,12 @@ struct Triangle {
     vec3 vertex3;
     vec3 normal;
     vec3 color;
+    // Issue #57: per-vertex texture coordinates.
+    vec2 uv1;
+    vec2 uv2;
+    vec2 uv3;
+    // Issue #57: packed texture ids (x = albedo, y = normal; -1 = none).
+    vec2 textures;
 };
 
 struct Intersect {
@@ -56,4 +63,8 @@ struct Intersect {
     vec3 color;
     vec3 normal;
     vec3 material;
+    // Issue #57: interpolated texture coordinates and packed texture ids at
+    // the hit point (x = albedo id, y = normal id; -1 = no texture).
+    vec2 uv;
+    vec2 textures;
 };

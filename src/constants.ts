@@ -24,7 +24,22 @@ export const EMISSIVE_STRENGTH = 4.0;
 export const CLEARCOAT_STRENGTH = 0.5;
 export const THINFILM_THICKNESS_NM = 400.0;
 
-const triangles = [
+// Issue #57: texture id sentinel meaning "no texture bound" for a triangle.
+export const NO_TEXTURE = -1;
+
+interface SceneTriangle {
+  vertex1: Float32Array;
+  vertex2: Float32Array;
+  vertex3: Float32Array;
+  normal: Float32Array;
+  color: Float32Array;
+  // Issue #57: per-vertex texture coordinates (optional; defaults applied in
+  // the flattening pass) and packed [albedoTextureId, normalTextureId].
+  uv?: [Float32Array, Float32Array, Float32Array];
+  textures?: [number, number];
+}
+
+const triangles: SceneTriangle[] = [
   {
     vertex1: new Float32Array([0.0, 0.0, -1.0]),
     vertex2: new Float32Array([0.0, 1.0, -1.0]),
@@ -61,6 +76,13 @@ const triangles = [
     vertex3: new Float32Array([0.0, 1.0, 1.0]),
     normal: new Float32Array([0.0, 0.0, -1.0]),
     color: new Float32Array([1.0, 1.0, 1.0]),
+    // Issue #57: textured demo surface (checker albedo id 0 + bump normal id 0).
+    uv: [
+      new Float32Array([0.0, 0.0]),
+      new Float32Array([2.0, 0.0]),
+      new Float32Array([0.0, 2.0]),
+    ],
+    textures: [0, 0],
   },
   {
     vertex1: new Float32Array([1.0, 0.0, 1.0]),
@@ -68,7 +90,16 @@ const triangles = [
     vertex3: new Float32Array([0.0, 1.0, 1.0]),
     normal: new Float32Array([0.0, 0.0, -1.0]),
     color: new Float32Array([1.0, 1.0, 1.0]),
+    uv: [
+      new Float32Array([2.0, 0.0]),
+      new Float32Array([2.0, 2.0]),
+      new Float32Array([0.0, 2.0]),
+    ],
+    textures: [0, 0],
   },
+  // Issue #57: textured demo surfaces — checkered albedo map + procedural
+  // bump normal map on the z=1 wall.
+
 
   {
     vertex1: new Float32Array([0.0, 1.0, -1.0]),
@@ -189,8 +220,8 @@ const ellipsoids = [
   },
 ];
 
+const TRIANGLE_VEC_VALUE_COUNT = 24; // Issue #57: was 15; now includes UVs + texture ids.
 const ELLIPSOID_VEC_VALUE_COUNT = 12;
-const TRIANGLE_VEC_VALUE_COUNT = 15;
 export const flattenedTriangles = new Float32Array(triangles.length * TRIANGLE_VEC_VALUE_COUNT);
 export const flattenedEllipsoids = new Float32Array(ellipsoids.length * ELLIPSOID_VEC_VALUE_COUNT);
 export const vertices = new Float32Array([-1, 1, -1, -1, 1, 1, -1, -1, 1, -1, 1, 1]);
@@ -217,6 +248,22 @@ triangles.forEach((triangle, i) => {
   flattenedTriangles.set(triangle.vertex3, offset + 6);
   flattenedTriangles.set(triangle.normal, offset + 9);
   flattenedTriangles.set(triangle.color, offset + 12);
+  // Issue #57: slots 5-6 carry two packed UV pairs and the packed texture ids
+  // (albedo id in slot-6 .z, normal id in slot-6 .w; -1 = no texture).
+  // Triangles without explicit UVs get a default (0,0)-(1,0)-(1,1) mapping.
+  const uvOffset = offset + 15;
+  const uvs = triangle.uv ?? [
+    new Float32Array([0, 0]),
+    new Float32Array([1, 0]),
+    new Float32Array([1, 1]),
+  ];
+  // Slot 5 = vec4(uv1.x, uv1.y, uv2.x, uv2.y), slot 6 = vec4(uv3.x, uv3.y, texIdA, texIdB).
+  flattenedTriangles.set(uvs[0], uvOffset);
+  flattenedTriangles.set(uvs[1], uvOffset + 2);
+  flattenedTriangles.set(uvs[2], uvOffset + 4);
+  const textures = triangle.textures ?? [NO_TEXTURE, NO_TEXTURE];
+  flattenedTriangles[uvOffset + 6] = textures[0];
+  flattenedTriangles[uvOffset + 7] = textures[1];
 });
 
 ellipsoids.forEach((ellipsoid, i) => {

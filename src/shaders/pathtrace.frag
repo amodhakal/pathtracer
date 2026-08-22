@@ -81,6 +81,46 @@ uniform float u_EnvIntensity;
 uniform sampler2D u_NoiseTexture;
 uniform sampler2D u_AccumTexture;
 
+// Issue #57: albedo and normal map texture arrays. Each scene triangle can
+// reference one albedo map (id in hit.textures.x) and one normal map
+// (hit.textures.y); -1 means "no texture". MAX_TEXTURES is the array bound.
+#define MAX_TEXTURES 4
+uniform sampler2D u_AlbedoTextures[MAX_TEXTURES];
+uniform sampler2D u_NormalTextures[MAX_TEXTURES];
+
+// Samples the albedo map for a hit; falls back to the base color when the
+// triangle has no albedo texture assigned.
+vec3 sampleAlbedo(vec3 baseColor, Intersect hit) {
+    int id = int(hit.textures.x + 0.5f);
+    if(id < 0 || id >= MAX_TEXTURES) {
+        return baseColor;
+    }
+    return baseColor * texture(u_AlbedoTextures[id], hit.uv).rgb;
+}
+
+// Perturbs the shading normal with a tangent-space normal map. The tangent
+// frame is derived from the geometric normal on the fly (same construction
+// as sampleBounceDirection), which is sufficient for axis-aligned walls.
+vec3 sampleNormal(vec3 normal, Intersect hit) {
+    int id = int(hit.textures.y + 0.5f);
+    if(id < 0 || id >= MAX_TEXTURES) {
+        return normal;
+    }
+    vec3 tangentNormal = texture(u_NormalTextures[id], hit.uv).rgb * 2.0f - 1.0f;
+
+    vec3 basis = abs(normal.x) > 0.9f ? vec3(0.0f, 1.0f, 0.0f) : vec3(1.0f, 0.0f, 0.0f);
+    vec3 tangent = normalize(cross(basis, normal));
+    vec3 bitangent = cross(normal, tangent);
+
+    vec3 perturbed = tangentNormal.x * tangent
+        + tangentNormal.y * bitangent
+        + max(tangentNormal.z, 0.0f) * normal;
+    if(dot(perturbed, perturbed) < CLIP_VAL) {
+        return normal;
+    }
+    return normalize(perturbed);
+}
+
 #include <intersection>
 
 vec3 tracePath(vec3 startPoint, vec3 startDirection);
@@ -326,6 +366,12 @@ vec3 calculateDirectIllumination(vec3 point, vec3 normal, vec3 color) {
             triangle.vertex3 = u_Triangles[i * TRIANGLE_VECTORS + 2];
             triangle.normal = u_Triangles[i * TRIANGLE_VECTORS + 3];
             triangle.color = u_Triangles[i * TRIANGLE_VECTORS + 4];
+            // Issue #57: UV/texture slots are irrelevant for occlusion tests
+            // but must be populated to satisfy the struct layout.
+            triangle.uv1 = u_Triangles[i * TRIANGLE_VECTORS + 5].xy;
+            triangle.uv2 = u_Triangles[i * TRIANGLE_VECTORS + 5].zw;
+            triangle.uv3 = u_Triangles[i * TRIANGLE_VECTORS + 6].xy;
+            triangle.textures = u_Triangles[i * TRIANGLE_VECTORS + 6].zw;
 
             occluded = rayTriangleOccluded(shadowRayOrigin, lightDirection, lightDistance - SHADOW_CLIP, triangle);
         }
@@ -390,6 +436,10 @@ vec3 tracePath(vec3 startPoint, vec3 startDirection) {
             }
             break;
         }
+
+        // Issue #57: apply albedo/normal maps at each hit before shading.
+        hit.color = sampleAlbedo(hit.color, hit);
+        hit.normal = sampleNormal(hit.normal, hit);
 
         if(isEmitter(hit.color.r, hit.color.g, hit.color.b)) {
             accumulated += throughput * hit.color;
