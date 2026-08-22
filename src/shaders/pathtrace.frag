@@ -14,6 +14,10 @@ precision highp float;
 // accumulated, so rare high-energy spikes (fireflies) can't dominate the
 // running average. Applied per-sample in main(), not per-bounce.
 #define FIREFLY_CLAMP 10.0
+// Issue #62: spectral dispersion strength for glass. The per-channel IOR is
+// offset from the material's base IOR by +- this fraction of (ior - 1.0),
+// so blue bends more than red and paths split into rainbow fringes.
+#define GLASS_DISPERSION 0.06
 
 // Issue #55: emissive material strength (radiance multiplier for MATERIAL_EMISSIVE)
 #define EMISSIVE_STRENGTH 4.0
@@ -135,6 +139,17 @@ float fresnelSchlick(float cosTheta, float ior) {
 
 vec3 calculateReflection(vec3 incident, vec3 faceNormal) {
     return incident - 2.0f * dot(faceNormal, incident) * faceNormal;
+}
+
+// Issue #62: spectral dispersion. Pick one RGB channel stochastically and
+// offset the base IOR for it — blue bends more, red less. Over accumulated
+// samples this splits refraction into rainbow fringes like a prism.
+float sampleDispersiveIor(float baseIor) {
+    float channel = getRand() * 3.0f;
+    // Offsets in units of (baseIor - 1.0) so dispersion scales with the
+    // material's own refractivity: R -1/3, G 0, B +1/3 of GLASS_DISPERSION.
+    float offset = (floor(channel) - 1.0f) * (2.0f / 3.0f) * GLASS_DISPERSION;
+    return max(baseIor + offset * (baseIor - 1.0f), 1.0f);
 }
 
 vec3 calculateRefraction(vec3 incident, vec3 faceNormal, float ior, out bool isTIR) {
@@ -541,8 +556,13 @@ vec3 tracePath(vec3 startPoint, vec3 startDirection) {
             // TIR handled) instead of the Schlick-based lobe hack.
             vec3 newDirection;
             vec3 lobeWeight;
+            // Issue #62: sample a per-channel dispersive IOR so refraction (and
+            // its Fresnel weight) varies with wavelength. Reflection stays
+            // achromatic; only the refracted path disperses.
+            float baseIor = hit.material.y;
+            float ior = sampleDispersiveIor(baseIor);
             bool survived = sampleGlassBsdf(direction, hit.normal, hit.color,
-                hit.material.y, hit.material.z, newDirection, lobeWeight);
+                ior, hit.material.z, newDirection, lobeWeight);
 
             direction = newDirection;
             suppressEnvHit = false; // specular chain: env hits stay enabled

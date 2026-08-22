@@ -106,4 +106,15 @@ describe("shader sources", () => {
       assembled.indexOf("uniform vec3 u_Ellipsoids"),
     );
   });
+
+  it("implements spectral dispersion in glass (issue #62)", () => {
+    const pathtrace = readFileSync(join(shaderDir, "pathtrace.frag"), "utf8");
+    expect(pathtrace).toContain("GLASS_DISPERSION");
+    expect(pathtrace).toContain("sampleDispersiveIor");
+    // Dispersion must feed the glass BSDF sampler (which applies both the
+    // refracted lobe and its exact-Fresnel weight with the sampled IOR).
+    expect(pathtrace).toContain("float sampleDispersiveIor(float baseIor)");
+    expect(pathtrace).toContain("float sampleDispersiveIor(float baseIor)");
+    expect(pathtrace).toMatch(/sampleGlassBsdf\([^)]*ior,/s);
+  });
 });
