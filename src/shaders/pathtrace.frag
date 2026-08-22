@@ -422,18 +422,29 @@ vec3 tracePath(vec3 startPoint, vec3 startDirection) {
 }
 
 void main() {
-    vec2 pos = v_WindowPixels.xy;
-    pos.x *= u_Resolution.x / u_Resolution.y;
+    vec3 rayOrigin = u_Eye;
+    vec2 ndc = v_WindowPixels.xy;
+
+    // Pinhole camera model with vertical FOV and aspect correction.
+    // tanHalfFov = 1.25 reproduces the legacy ray-gen mapping (ndc [-1,1]
+    // onto the z=0 plane at x,y in [0,2] from eye z=-0.4): vertical
+    // half-extent 0.5 / distance 0.4 = 1.25, i.e. vFOV ~= 102.6 degrees.
+    const float FOV_DEGREES = 102.6f;
+    float tanHalfFov = tan(radians(FOV_DEGREES) * 0.5f);
+    float aspect = u_Resolution.x / u_Resolution.y;
+
+    vec3 forward = vec3(0.0f, 0.0f, -1.0f);
+    vec3 right = vec3(1.0f, 0.0f, 0.0f) * tanHalfFov * aspect;
+    vec3 up = vec3(0.0f, 1.0f, 0.0f) * tanHalfFov;
 
     // Issue #12: sub-pixel jitter — offset by a random amount within the pixel
     // each frame so averaging over accumulated frames converges to anti-aliasing.
-    // After aspect-scaling pos.x, one screen pixel spans 1/res.y in both axes.
+    // In NDC, one screen pixel spans 2/res.y in both axes (x is aspect-scaled).
     float pixelSize = 2.0f / u_Resolution.y;
     vec2 jitter = (vec2(getRand(), getRand()) - 0.5f) * pixelSize;
 
-    vec3 rayOrigin = u_Eye;
-    vec3 targetPoint = vec3((pos.xy + jitter + 1.0f) * 0.5f, 0.0f);
-    vec3 rayDirection = normalize(targetPoint - rayOrigin);
+    vec3 rayDirection = normalize(
+        forward + right * (ndc.x + jitter.x) + up * (ndc.y + jitter.y));
 
     vec3 sampleColor = tracePath(rayOrigin, rayDirection);
 
