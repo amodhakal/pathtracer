@@ -139,12 +139,10 @@ const ellipsoids = [
 ];
 
 export const ELLIPSOID_COUNT = ellipsoids.length;
-// Upload stride: one vec4 slot per vec3 value. GLSL array uniforms of vec3 are
-// packed with a 4-float stride, so uploading only 12 floats per ellipsoid would
-// leave the last vec3 slot of each ellipsoid (and trailing ellipsoids when the
-// shader's ELLIPSOID_COUNT exceeds the scene data) reading uninitialized zeros.
-// Zero-padding keeps every uniform slot initialized.
-export const ELLIPSOID_UPLOAD_STRIDE = 16;
+// Upload stride: 3 contiguous floats per vec3. `gl.uniform3fv` uploads N*3
+// tightly packed floats for a `uniform vec3 u_Ellipsoids[N]` array — there is
+// no vec4 padding in plain uniform array layout (that's std140 UBO territory).
+export const ELLIPSOID_UPLOAD_STRIDE = 12;
 const TRIANGLE_VEC_VALUE_COUNT = 15;
 export const flattenedTriangles = new Float32Array(triangles.length * TRIANGLE_VEC_VALUE_COUNT);
 export const flattenedEllipsoids = new Float32Array(ELLIPSOID_COUNT * ELLIPSOID_UPLOAD_STRIDE);
@@ -170,7 +168,7 @@ triangles.forEach((triangle, i) => {
 ellipsoids.forEach((ellipsoid, i) => {
   const offset = i * ELLIPSOID_UPLOAD_STRIDE;
   flattenedEllipsoids.set(ellipsoid.position, offset);
-  flattenedEllipsoids.set(ellipsoid.radius, offset + 4);
-  flattenedEllipsoids.set(ellipsoid.color, offset + 8);
-  flattenedEllipsoids.set(ellipsoid.material, offset + 12);
+  flattenedEllipsoids.set(ellipsoid.radius, offset + 3);
+  flattenedEllipsoids.set(ellipsoid.color, offset + 6);
+  flattenedEllipsoids.set(ellipsoid.material, offset + 9);
 });
