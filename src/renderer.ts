@@ -67,6 +67,10 @@ export class Renderer {
   private writeTex: WebGLTexture | null = null;
 
   private frameCount = 0;
+  // Issue #65: performance.now() timestamp (ms) captured when rendering starts;
+  // u_Time is derived from it so animation is wall-clock based and unaffected
+  // by frame-rate jitter.
+  private startTimeMs: number | null = null;
   private renderLoopActive = false;
   private resizeObserver: ResizeObserver;
 
@@ -78,6 +82,13 @@ export class Renderer {
     lastY: number;
     button: number;
   } | null = null;
+  // Issue #65: seconds since the first frame of the current render loop.
+  private elapsedSeconds(): number {
+    if(this.startTimeMs === null) {
+      this.startTimeMs = performance.now();
+    }
+    return (performance.now() - this.startTimeMs) / 1000.0;
+  }
 
   constructor(
     canvas: HTMLCanvasElement,
@@ -104,6 +115,10 @@ export class Renderer {
       // dead uniform lookup and per-frame upload were removed here (issue #15).
       u_Resolution: gl.getUniformLocation(programs.pathtrace, "u_Resolution")!,
       u_FrameCount: gl.getUniformLocation(programs.pathtrace, "u_FrameCount")!,
+      // Issue #65: wall-clock seconds driving scene animation / motion blur.
+      // Reintroduced (it was removed as dead in issue #15) now that the
+      // shader actually consumes it for temporal features.
+      u_Time: gl.getUniformLocation(programs.pathtrace, "u_Time")!,
       u_NoiseTexture: gl.getUniformLocation(programs.pathtrace, "u_NoiseTexture")!,
       u_AccumTexture: gl.getUniformLocation(programs.pathtrace, "u_AccumTexture")!,
       // Issue #58: thin-lens DOF.
@@ -226,6 +241,7 @@ export class Renderer {
       u_Triangles: WebGLUniformLocation;
       u_Resolution: WebGLUniformLocation;
       u_FrameCount: WebGLUniformLocation;
+      u_Time: WebGLUniformLocation;
       u_AccumTexture: WebGLUniformLocation;
       // Issue #58: thin-lens DOF.
       u_ApertureRadius: WebGLUniformLocation;
@@ -306,6 +322,10 @@ export class Renderer {
     // at init; only dynamic values are uploaded per frame here.
     gl.uniform2f(this.uniforms.pathtraceUniforms.u_Resolution, t.textureWidth, t.textureHeight);
     gl.uniform1f(this.uniforms.pathtraceUniforms.u_FrameCount, this.frameCount);
+    // Issue #65: seconds since the render loop started. Drives the animated
+    // ellipsoid in the shader; the accumulation average across frames becomes
+    // motion blur.
+    gl.uniform1f(this.uniforms.pathtraceUniforms.u_Time, this.elapsedSeconds());
 
     gl.drawArrays(gl.TRIANGLES, 0, 6);
     gl.bindVertexArray(null);

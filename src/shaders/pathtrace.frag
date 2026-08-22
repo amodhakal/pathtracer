@@ -51,6 +51,10 @@ uniform vec3 u_BvhNodes[BVH_NODE_COUNT * BVH_NODE_SLOTS];
 uniform vec3 u_BvhPrimIndices[PRIMITIVE_COUNT];
 uniform vec2 u_Resolution;
 uniform float u_FrameCount;
+// Issue #65: wall-clock seconds, driven from the renderer each frame. Drives
+// time-dependent scene animation; because the accumulation buffer averages
+// samples across frames, moving geometry naturally integrates into motion blur.
+uniform float u_Time;
 uniform vec3 u_EnvTop;
 uniform vec3 u_EnvBottom;
 uniform float u_EnvIntensity;
@@ -104,6 +108,37 @@ vec3 sampleNormal(vec3 normal, Intersect hit) {
 #include <intersection>
 #include <bvh>
 #include <prng>
+
+// ---- Issue #65: temporal animation ----------------------------------------
+//
+// The accumulation buffer stores a SUM of per-frame radiance samples and the
+// display pass divides by the frame count, so any scene quantity that varies
+// with u_Time is averaged over the frames it took to converge. That average IS
+// the motion blur: a sphere translating through the frame contributes radiance
+// from every position it occupied, weighted by how long it lingered there.
+// u_FrameCount keeps decorrelating the RNG; u_Time supplies the trajectory.
+
+// Animation period in seconds — one full orbit of the moving ellipsoid.
+#define ANIMATION_PERIOD 8.0
+
+// Issue #65: time-varying positions for animated scene elements. Kept in one
+// place so intersection code (which reads u_Ellipsoids/u_Triangles directly)
+// can apply identical transforms without duplicating math.
+
+// Orbital offset applied to the first ellipsoid (the yellow diffuse ball).
+vec3 animatedEllipsoidOffset(int index) {
+    if(index != 0) {
+        return vec3(0.0f);
+    }
+    float phase = 2.0f * 3.14159265f * u_Time / ANIMATION_PERIOD;
+    return vec3(0.25f * sin(phase), 0.1f * sin(2.0f * phase), 0.25f * cos(phase));
+}
+
+// Returns the (possibly animated) center of ellipsoid `index`.
+vec3 ellipsoidCenter(int index) {
+    return u_Ellipsoids[index * ELLIPSOID_VECTORS] + animatedEllipsoidOffset(index);
+}
+
 
 vec3 tracePath(vec3 startPoint, vec3 startDirection);
 vec3 evaluateEnvironment(vec3 direction);
@@ -334,7 +369,7 @@ vec3 evaluateEnvironment(vec3 direction) {
 bool traceShadowRay(vec3 origin, vec3 direction) {
     for(int i = 0; i < ELLIPSOID_COUNT; i++) {
         Ellipsoid ellipsoid;
-        ellipsoid.center = u_Ellipsoids[i * ELLIPSOID_VECTORS];
+        ellipsoid.center = ellipsoidCenter(i); // Issue #65: animated center
         ellipsoid.radius = u_Ellipsoids[i * ELLIPSOID_VECTORS + 1];
         ellipsoid.color = u_Ellipsoids[i * ELLIPSOID_VECTORS + 2];
         ellipsoid.material = u_Ellipsoids[i * ELLIPSOID_VECTORS + 3];
@@ -424,6 +459,26 @@ vec3 calculateDirectIllumination(vec3 point, vec3 normal, vec3 color) {
 
         // Issue #49/#47: occlusion-only any-hit query via BVH traversal.
         bool occluded = bvhAnyHit(shadowRayOrigin, lightDirection, lightDistance - SHADOW_CLIP);
+        // Issue #65: animated ellipsoid centers are applied TS-side when
+        // uploading u_Ellipsoids each frame, so the BVH traversal above sees
+        // the animated positions without any shader-side changes.
+
+        for(int i = 0; i < TRIANGLE_COUNT && !occluded; i++) {
+            Triangle triangle;
+            triangle.vertex1 = u_Triangles[i * TRIANGLE_VECTORS];
+            triangle.vertex2 = u_Triangles[i * TRIANGLE_VECTORS + 1];
+            triangle.vertex3 = u_Triangles[i * TRIANGLE_VECTORS + 2];
+            triangle.normal = u_Triangles[i * TRIANGLE_VECTORS + 3];
+            triangle.color = u_Triangles[i * TRIANGLE_VECTORS + 4];
+            // Issue #57: UV/texture slots are irrelevant for occlusion tests
+            // but must be populated to satisfy the struct layout.
+            triangle.uv1 = u_Triangles[i * TRIANGLE_VECTORS + 5].xy;
+            triangle.uv2 = u_Triangles[i * TRIANGLE_VECTORS + 5].zw;
+            triangle.uv3 = u_Triangles[i * TRIANGLE_VECTORS + 6].xy;
+            triangle.textures = u_Triangles[i * TRIANGLE_VECTORS + 6].zw;
+
+            occluded = rayTriangleOccluded(shadowRayOrigin, lightDirection, lightDistance - SHADOW_CLIP, triangle);
+        }
 
         if(occluded) {
             continue;
