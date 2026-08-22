@@ -196,6 +196,13 @@ export const flattenedEllipsoids = new Float32Array(ellipsoids.length * ELLIPSOI
 export const vertices = new Float32Array([-1, 1, -1, -1, 1, 1, -1, -1, 1, -1, 1, 1]);
 export const eye = new Float32Array([0.5, 0.5, -0.4]);
 export const time = Date.now();
+// Issue #56: procedural gradient environment (IBL) — sky above, ground below.
+export const environment = {
+  top: new Float32Array([0.55, 0.7, 0.95]),
+  bottom: new Float32Array([0.25, 0.2, 0.15]),
+  intensity: 1.0,
+};
+
 export const light = {
   position: new Float32Array([0.5, 0.96, 0.0]),
   color: new Float32Array([9.0, 9.0, 9.0]),

@@ -75,12 +75,17 @@ uniform vec3 u_Triangles[TRIANGLE_COUNT * TRIANGLE_VECTORS];
 uniform float u_Time;
 uniform vec2 u_Resolution;
 uniform float u_FrameCount;
+uniform vec3 u_EnvTop;
+uniform vec3 u_EnvBottom;
+uniform float u_EnvIntensity;
 uniform sampler2D u_NoiseTexture;
 uniform sampler2D u_AccumTexture;
 
 #include <intersection>
 
 vec3 tracePath(vec3 startPoint, vec3 startDirection);
+vec3 evaluateEnvironment(vec3 direction);
+vec3 sampleEnvironmentIllumination(vec3 point, vec3 normal, vec3 albedo);
 vec3 calculateDirectIllumination(vec3 point, vec3 normal, vec3 color);
 vec3 sampleBounceDirection(vec3 normal);
 bool isEmitter(float r, float g, float b);
@@ -199,6 +204,74 @@ vec3 thinFilmReflectance(float cosTheta, float thicknessNm, float ior) {
 // emit hit.color * strength regardless of whether color exceeds 1.
 bool isEmissiveMaterial(vec3 material) {
     return int(material.x + 0.5f) == MATERIAL_EMISSIVE;
+// Issue #56: procedural gradient environment map. Rays that escape the
+// scene pick up infinite-geometry radiance from this IBL instead of black.
+vec3 evaluateEnvironment(vec3 direction) {
+    float t = clamp(direction.y * 0.5f + 0.5f, 0.0f, 1.0f);
+    return mix(u_EnvBottom, u_EnvTop, t) * u_EnvIntensity;
+}
+
+bool traceShadowRay(vec3 origin, vec3 direction) {
+    for(int i = 0; i < ELLIPSOID_COUNT; i++) {
+        Ellipsoid ellipsoid;
+        ellipsoid.center = u_Ellipsoids[i * ELLIPSOID_VECTORS];
+        ellipsoid.radius = u_Ellipsoids[i * ELLIPSOID_VECTORS + 1];
+        ellipsoid.color = u_Ellipsoids[i * ELLIPSOID_VECTORS + 2];
+        ellipsoid.material = u_Ellipsoids[i * ELLIPSOID_VECTORS + 3];
+        Intersect shadowHit = calculateRayEllipsoidIntersect(origin, direction, ellipsoid);
+        if(shadowHit.isExisting && shadowHit.distance > CLIP_VAL) {
+            return true;
+        }
+    }
+
+    for(int i = 0; i < TRIANGLE_COUNT; i++) {
+        Triangle triangle;
+        triangle.vertex1 = u_Triangles[i * TRIANGLE_VECTORS];
+        triangle.vertex2 = u_Triangles[i * TRIANGLE_VECTORS + 1];
+        triangle.vertex3 = u_Triangles[i * TRIANGLE_VECTORS + 2];
+        triangle.normal = u_Triangles[i * TRIANGLE_VECTORS + 3];
+        triangle.color = u_Triangles[i * TRIANGLE_VECTORS + 4];
+        Intersect shadowHit = calculateRayTriangleIntersect(origin, direction, triangle);
+        if(shadowHit.isExisting && shadowHit.distance > CLIP_VAL) {
+            return true;
+        }
+    }
+    return false;
+}
+
+// Issue #56: next-event estimation toward the environment with
+// cosine-weighted importance sampling of the hemisphere.
+//
+// Sampling: pdf(w) = cos(theta_i) / PI over the hemisphere around the normal.
+// With a Lambertian brdf f = albedo / PI, the estimator reduces to:
+//   Lo = Le_env(w) * albedo   (cos theta cancels against the pdf)
+// Full MIS between this NEE strategy and BSDF-sampled env hits is deferred;
+// double counting is avoided by suppressing env hits along rays whose last
+// bounce was a diffuse NEE-covered surface.
+vec3 sampleEnvironmentIllumination(vec3 point, vec3 normal, vec3 albedo) {
+    vec3 basis = abs(normal.x) > 0.9f ? vec3(0.0f, 1.0f, 0.0f) : vec3(1.0f, 0.0f, 0.0f);
+    vec3 tangent = normalize(cross(basis, normal));
+    vec3 bitangent = cross(normal, tangent);
+
+    // Cosine-weighted hemisphere sample: r = sqrt(u1), phi = 2*PI*u2.
+    float u1 = getRand();
+    float u2 = getRand();
+    float r = sqrt(u1);
+    float phi = 6.283185307179586f * u2;
+    vec3 local = vec3(r * cos(phi), r * sin(phi), sqrt(max(1.0f - u1, 0.0f)));
+    vec3 sampleDir = normalize(local.x * tangent + local.y * bitangent + local.z * normal);
+
+    float ndotl = dot(normal, sampleDir);
+    if(ndotl <= 0.0f) {
+        return vec3(0.0f);
+    }
+
+    vec3 shadowOrigin = point + normal * SHADOW_CLIP;
+    if(traceShadowRay(shadowOrigin, sampleDir)) {
+        return vec3(0.0f);
+    }
+
+    return evaluateEnvironment(sampleDir) * albedo;
 }
 
 vec3 calculateDirectIllumination(vec3 point, vec3 normal, vec3 color) {
@@ -303,11 +376,18 @@ vec3 tracePath(vec3 startPoint, vec3 startDirection) {
     vec3 direction = startDirection;
     vec3 accumulated = vec3(0.0f);
     vec3 throughput = vec3(1.0f);
+    // Issue #56: after a diffuse bounce the environment has already been
+    // accounted for by cosine-weighted NEE, so an escaping ray must not add
+    // the env radiance again. Specular chains (mirror/glass/camera) keep it.
+    bool suppressEnvHit = false;
 
     for(int depth = 0; depth < MAX_BOUNCES; depth++) {
         Intersect hit = findClosestIntersect(point, direction);
 
         if(!hit.isExisting) {
+            if(!suppressEnvHit) {
+                accumulated += throughput * evaluateEnvironment(direction);
+            }
             break;
         }
 
@@ -328,6 +408,7 @@ vec3 tracePath(vec3 startPoint, vec3 startDirection) {
             direction = calculateReflection(direction, hit.normal);
             point = hit.intersect + hit.normal * CLIP_VAL;
             throughput *= hit.color;
+            suppressEnvHit = false;
 
             if(depth > 1 && getRand() < P_BOUNCE) {
                 break;
@@ -353,6 +434,7 @@ vec3 tracePath(vec3 startPoint, vec3 startDirection) {
 
             bool isReflecting = refracted == vec3(0.0f) || getRand() < fresnel;
             direction = isReflecting ? reflected : refracted;
+            suppressEnvHit = false;
             vec3 travelSide = dot(direction, hit.normal) < 0.0f ? -hit.normal : hit.normal;
             point = hit.intersect + travelSide * CLIP_VAL;
             throughput *= mix(vec3(1.0f), hit.color, opacity);
@@ -471,6 +553,10 @@ vec3 tracePath(vec3 startPoint, vec3 startDirection) {
         }
 
         accumulated += throughput * calculateDirectIllumination(hit.intersect, hit.normal, hit.color);
+
+        // Issue #56: environment (IBL) contribution via importance sampling.
+        accumulated += throughput * sampleEnvironmentIllumination(hit.intersect, hit.normal, hit.color);
+        suppressEnvHit = true;
 
         if(depth > 1 && getRand() < P_BOUNCE) {
             break;
