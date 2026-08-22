@@ -20,11 +20,15 @@ if (!(canvasElement instanceof HTMLCanvasElement)) {
   throw new Error(message);
 }
 const canvas: HTMLCanvasElement = canvasElement;
-const gl = canvas.getContext("webgl2");
-if (!gl) {
+// Issue #16: keep the raw context in its own variable so the non-null `gl`
+// alias below stays valid for all helper functions.
+const glContext = canvas.getContext("webgl2");
+if (!glContext) {
   alert("WebGL2 not supported");
   throw new Error("WebGL2 not supported");
 }
+// Non-null alias so helper functions below see a defined context.
+const gl: WebGL2RenderingContext = glContext;
 
 const floatExt = gl.getExtension("EXT_color_buffer_float");
 if (!floatExt) {
@@ -32,48 +36,141 @@ if (!floatExt) {
   throw new Error("EXT_color_buffer_float not supported");
 }
 
-try {
-  const vertexShader = createShader(gl, gl.VERTEX_SHADER, vertexCode);
+let vertexShader: WebGLShader;
+let pathtraceShader: WebGLShader;
+let pathtraceProgram: WebGLProgram;
+let localShader: WebGLShader;
+let localProgram: WebGLProgram;
+let displayShader: WebGLShader;
+let displayProgram: WebGLProgram;
+let noiseGenShader: WebGLShader;
+let noiseProgram: WebGLProgram;
 
-  const pathtraceShader = createShader(gl, gl.FRAGMENT_SHADER, pathtraceFragCode);
-  const pathtraceProgram = createProgram(gl, vertexShader, pathtraceShader);
+const vertexBuffer = gl.createBuffer();
+gl.bindBuffer(gl.ARRAY_BUFFER, vertexBuffer);
+gl.bufferData(gl.ARRAY_BUFFER, vertices, gl.STATIC_DRAW);
 
-  const localShader = createShader(gl, gl.FRAGMENT_SHADER, localFragCode);
-  const localProgram = createProgram(gl, vertexShader, localShader);
+let posLocPathtrace: number;
+let posLocLocal: number;
+let posLocDisplay: number;
+let posLocNoise: number;
 
-  const displayShader = createShader(gl, gl.FRAGMENT_SHADER, displayFragCode);
-  const displayProgram = createProgram(gl, vertexShader, displayShader);
+let textureWidth = 0;
+let textureHeight = 0;
 
-  const noiseGenShader = createShader(gl, gl.FRAGMENT_SHADER, noiseGenFragCode);
-  const noiseProgram = createProgram(gl, vertexShader, noiseGenShader);
+let noiseTexture: WebGLTexture | null = null;
+let noiseFBO: WebGLFramebuffer | null = null;
+let accumTextureA: WebGLTexture | null = null;
+let accumTextureB: WebGLTexture | null = null;
+let fboA: WebGLFramebuffer | null = null;
+let fboB: WebGLFramebuffer | null = null;
 
-  const vertexBuffer = gl.createBuffer();
-  gl.bindBuffer(gl.ARRAY_BUFFER, vertexBuffer);
-  gl.bufferData(gl.ARRAY_BUFFER, vertices, gl.STATIC_DRAW);
+// Issue #16: uniform locations become mutable so they can be re-resolved
+// after a context loss/restore cycle.
+let pathtraceUniforms: {
+  u_Eye: WebGLUniformLocation;
+  u_Light: {
+    position: WebGLUniformLocation;
+    color: WebGLUniformLocation;
+    normal: WebGLUniformLocation;
+    size: WebGLUniformLocation;
+  };
+  u_Ellipsoids: WebGLUniformLocation;
+  u_Triangles: WebGLUniformLocation;
+  u_Resolution: WebGLUniformLocation;
+  u_FrameCount: WebGLUniformLocation;
+  u_NoiseTexture: WebGLUniformLocation;
+  u_AccumTexture: WebGLUniformLocation;
+};
+let noiseUniforms: { u_Seed: WebGLUniformLocation; u_Resolution: WebGLUniformLocation };
+let localUniforms: {
+  u_Eye: WebGLUniformLocation;
+  u_Light: {
+    position: WebGLUniformLocation;
+    color: WebGLUniformLocation;
+    normal: WebGLUniformLocation;
+    size: WebGLUniformLocation;
+  };
+  u_Ellipsoids: WebGLUniformLocation;
+  u_Triangles: WebGLUniformLocation;
+  u_Resolution: WebGLUniformLocation;
+};
+let displayUniforms: { u_AccumTexture: WebGLUniformLocation };
 
-  const posLocPathtrace = gl.getAttribLocation(pathtraceProgram, "a_Position");
-  const posLocLocal = gl.getAttribLocation(localProgram, "a_Position");
-  const posLocDisplay = gl.getAttribLocation(displayProgram, "a_Position");
-  const posLocNoise = gl.getAttribLocation(noiseProgram, "a_Position");
+let readTex: WebGLTexture | null = null;
+let writeFbo: WebGLFramebuffer | null = null;
+let writeTex: WebGLTexture | null = null;
 
-  let textureWidth = 0;
-  let textureHeight = 0;
+let frameCount = 0;
+let renderLoopActive = false;
 
-  let noiseTexture: WebGLTexture | null = null;
-  let noiseFBO: WebGLFramebuffer | null = null;
-  let accumTextureA: WebGLTexture | null = null;
-  let accumTextureB: WebGLTexture | null = null;
-  let fboA: WebGLFramebuffer | null = null;
-  let fboB: WebGLFramebuffer | null = null;
+// Issue #16: all shader-program and uniform-location setup lives here so it can
+// be re-run after webglcontextrestored invalidates every GL object.
+function initGLResources() {
+  vertexShader = createShader(gl, gl.VERTEX_SHADER, vertexCode);
 
-  let readTex: WebGLTexture | null = null;
-  let writeFbo: WebGLFramebuffer | null = null;
-  let writeTex: WebGLTexture | null = null;
+  pathtraceShader = createShader(gl, gl.FRAGMENT_SHADER, pathtraceFragCode);
+  pathtraceProgram = createProgram(gl, vertexShader, pathtraceShader);
 
-  let frameCount = 0;
-  let renderLoopActive = false;
+  localShader = createShader(gl, gl.FRAGMENT_SHADER, localFragCode);
+  localProgram = createProgram(gl, vertexShader, localShader);
 
-  function createTexture(width: number, height: number, internalFormat: number, format: number, type: number) {
+  displayShader = createShader(gl, gl.FRAGMENT_SHADER, displayFragCode);
+  displayProgram = createProgram(gl, vertexShader, displayShader);
+
+  noiseGenShader = createShader(gl, gl.FRAGMENT_SHADER, noiseGenFragCode);
+  noiseProgram = createProgram(gl, vertexShader, noiseGenShader);
+
+  posLocPathtrace = gl.getAttribLocation(pathtraceProgram, "a_Position");
+  posLocLocal = gl.getAttribLocation(localProgram, "a_Position");
+  posLocDisplay = gl.getAttribLocation(displayProgram, "a_Position");
+  posLocNoise = gl.getAttribLocation(noiseProgram, "a_Position");
+
+  // Uniform locations
+  pathtraceUniforms = {
+    u_Eye: gl.getUniformLocation(pathtraceProgram, "u_Eye")!,
+    u_Light: {
+      position: gl.getUniformLocation(pathtraceProgram, "u_Light.position")!,
+      color: gl.getUniformLocation(pathtraceProgram, "u_Light.color")!,
+      normal: gl.getUniformLocation(pathtraceProgram, "u_Light.normal")!,
+      size: gl.getUniformLocation(pathtraceProgram, "u_Light.size")!,
+    },
+    u_Ellipsoids: gl.getUniformLocation(pathtraceProgram, "u_Ellipsoids")!,
+    u_Triangles: gl.getUniformLocation(pathtraceProgram, "u_Triangles")!,
+    // NOTE: shader-side u_Time declaration removed in pt/prng-sampling; the TS-side
+    // dead uniform lookup and per-frame upload were removed here (issue #15).
+    u_Resolution: gl.getUniformLocation(pathtraceProgram, "u_Resolution")!,
+    u_FrameCount: gl.getUniformLocation(pathtraceProgram, "u_FrameCount")!,
+    u_NoiseTexture: gl.getUniformLocation(pathtraceProgram, "u_NoiseTexture")!,
+    u_AccumTexture: gl.getUniformLocation(pathtraceProgram, "u_AccumTexture")!,
+  };
+
+  noiseUniforms = {
+    u_Seed: gl.getUniformLocation(noiseProgram, "u_Seed")!,
+    u_Resolution: gl.getUniformLocation(noiseProgram, "u_Resolution")!,
+  };
+
+  localUniforms = {
+    u_Eye: gl.getUniformLocation(localProgram, "u_Eye")!,
+    u_Light: {
+      position: gl.getUniformLocation(localProgram, "u_Light.position")!,
+      color: gl.getUniformLocation(localProgram, "u_Light.color")!,
+      normal: gl.getUniformLocation(localProgram, "u_Light.normal")!,
+      size: gl.getUniformLocation(localProgram, "u_Light.size")!,
+    },
+    u_Ellipsoids: gl.getUniformLocation(localProgram, "u_Ellipsoids")!,
+    u_Triangles: gl.getUniformLocation(localProgram, "u_Triangles")!,
+    u_Resolution: gl.getUniformLocation(localProgram, "u_Resolution")!,
+  };
+
+  displayUniforms = {
+    // Issue #24: renamed from the misleading u_NoiseTexture — this pass samples
+    // the accumulation result, not the noise texture.
+    u_AccumTexture: gl.getUniformLocation(displayProgram, "u_AccumTexture")!,
+  };
+}
+
+function createTexture(width: number, height: number, internalFormat: number, format: number, type: number) {
     if (!gl) return null;
     const texture = gl.createTexture();
     gl.bindTexture(gl.TEXTURE_2D, texture);
@@ -83,9 +180,9 @@ try {
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
     return texture;
-  }
+}
 
-  function setupFramebuffers(width: number, height: number) {
+function setupFramebuffers(width: number, height: number) {
     if (!gl) return;
     if (noiseTexture) gl.deleteTexture(noiseTexture);
     if (noiseFBO) gl.deleteFramebuffer(noiseFBO);
@@ -148,53 +245,9 @@ try {
     writeFbo = fboB;
     writeTex = accumTextureB;
     frameCount = 0;
-  }
+}
 
-  // Uniform locations
-  const pathtraceUniforms = {
-    u_Eye: gl.getUniformLocation(pathtraceProgram, "u_Eye")!,
-    u_Light: {
-      position: gl.getUniformLocation(pathtraceProgram, "u_Light.position")!,
-      color: gl.getUniformLocation(pathtraceProgram, "u_Light.color")!,
-      normal: gl.getUniformLocation(pathtraceProgram, "u_Light.normal")!,
-      size: gl.getUniformLocation(pathtraceProgram, "u_Light.size")!,
-    },
-    u_Ellipsoids: gl.getUniformLocation(pathtraceProgram, "u_Ellipsoids")!,
-    u_Triangles: gl.getUniformLocation(pathtraceProgram, "u_Triangles")!,
-    // NOTE: shader-side u_Time declaration removed in pt/prng-sampling; the TS-side
-    // dead uniform lookup and per-frame upload were removed here (issue #15).
-    u_Resolution: gl.getUniformLocation(pathtraceProgram, "u_Resolution")!,
-    u_FrameCount: gl.getUniformLocation(pathtraceProgram, "u_FrameCount")!,
-    u_NoiseTexture: gl.getUniformLocation(pathtraceProgram, "u_NoiseTexture")!,
-    u_AccumTexture: gl.getUniformLocation(pathtraceProgram, "u_AccumTexture")!,
-  };
-
-  const noiseUniforms = {
-    u_Seed: gl.getUniformLocation(noiseProgram, "u_Seed")!,
-    u_Resolution: gl.getUniformLocation(noiseProgram, "u_Resolution")!,
-  };
-
-  const localUniforms = {
-    u_Eye: gl.getUniformLocation(localProgram, "u_Eye")!,
-    u_Light: {
-      position: gl.getUniformLocation(localProgram, "u_Light.position")!,
-      color: gl.getUniformLocation(localProgram, "u_Light.color")!,
-      normal: gl.getUniformLocation(localProgram, "u_Light.normal")!,
-      size: gl.getUniformLocation(localProgram, "u_Light.size")!,
-    },
-    u_Ellipsoids: gl.getUniformLocation(localProgram, "u_Ellipsoids")!,
-    u_Triangles: gl.getUniformLocation(localProgram, "u_Triangles")!,
-    u_Resolution: gl.getUniformLocation(localProgram, "u_Resolution")!,
-  };
-
-
-  const displayUniforms = {
-    // Issue #24: renamed from the misleading u_NoiseTexture — this pass samples
-    // the accumulation result, not the noise texture.
-    u_AccumTexture: gl.getUniformLocation(displayProgram, "u_AccumTexture")!,
-  };
-
-  function renderNoise() {
+function renderNoise() {
     if (!gl) return;
     gl.bindFramebuffer(gl.FRAMEBUFFER, noiseFBO);
     gl.viewport(0, 0, textureWidth, textureHeight);
@@ -282,7 +335,7 @@ try {
     gl.drawArrays(gl.TRIANGLES, 0, 6);
   }
 
-  function render() {
+function render() {
     if (pathTracingEnabled) {
       renderNoise();
       renderPathtrace();
@@ -310,7 +363,7 @@ try {
     }
   }
 
-  function startRenderLoop() {
+function startRenderLoop() {
     if (renderLoopActive) return;
     renderLoopActive = true;
     requestAnimationFrame(render);
@@ -336,6 +389,7 @@ try {
     const width = Math.max(1, Math.round(canvas.clientWidth * RENDER_SCALE));
     const height = Math.max(1, Math.round(canvas.clientHeight * RENDER_SCALE));
 
+
     if (canvas.width === width && canvas.height === height) return;
 
     canvas.width = width;
@@ -349,6 +403,8 @@ try {
     startRenderLoop();
   }
 
+try {
+  initGLResources();
   resizeCanvas();
   // Issue #22: ResizeObserver alone handles canvas resizes — it fires whenever
   // the element's size changes, which covers window resizes too. The duplicate
@@ -359,3 +415,18 @@ try {
   console.error("Error: ", err);
   alert("Error: " + err);
 }
+
+// Issue #16: handle WebGL context loss. preventDefault lets the context be
+// restored later; on restore we rebuild every GL object (programs, textures,
+// framebuffers) that was invalidated, reset accumulation, and restart the loop.
+canvas.addEventListener("webglcontextlost", (event) => {
+  event.preventDefault();
+  renderLoopActive = false;
+});
+
+canvas.addEventListener("webglcontextrestored", () => {
+  initGLResources();
+  setupFramebuffers(textureWidth || canvas.width, textureHeight || canvas.height);
+  renderLoopActive = false;
+  startRenderLoop();
+});
