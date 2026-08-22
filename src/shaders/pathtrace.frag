@@ -66,7 +66,7 @@ vec3 calculateDirectIllumination(vec3 point, vec3 normal, vec3 color);
 vec3 sampleBounceDirection(vec3 normal);
 Intersect calculateRayEllipsoidIntersect(vec3 point, vec3 direction, Ellipsoid ellipsoid);
 Intersect calculateRayTriangleIntersect(vec3 point, vec3 direction, Triangle triangle);
-Intersect findClosestIntersect(vec3 point, vec3 direction, bool skipFront);
+Intersect findClosestIntersect(vec3 point, vec3 direction);
 QuadResult solveQuad(vec3 quads);
 bool isEmitter(float r, float g, float b);
 float fresnelSchlick(float cosTheta, float ior);
@@ -259,7 +259,7 @@ Intersect calculateRayTriangleIntersect(vec3 point, vec3 direction, Triangle tri
     return Intersect(true, term, intersect, triangle.color, triangle.normal, vec3(0.0f));
 }
 
-Intersect findClosestIntersect(vec3 point, vec3 direction, bool skipFront) {
+Intersect findClosestIntersect(vec3 point, vec3 direction) {
     Intersect closestIntersect = Intersect(false, 0.0f, vec3(0.0f), vec3(0.0f), vec3(0.0f), vec3(0.0f));
     float closestDistance = 1e20f;
 
@@ -270,13 +270,6 @@ Intersect findClosestIntersect(vec3 point, vec3 direction, bool skipFront) {
         triangle.vertex3 = u_Triangles[i * TRIANGLE_VECTORS + 2];
         triangle.normal = u_Triangles[i * TRIANGLE_VECTORS + 3];
         triangle.color = u_Triangles[i * TRIANGLE_VECTORS + 4];
-
-        if(skipFront
-            && abs(triangle.vertex1.z) < 0.001f
-            && abs(triangle.vertex2.z) < 0.001f
-            && abs(triangle.vertex3.z) < 0.001f) {
-            continue;
-        }
 
         Intersect intersect = calculateRayTriangleIntersect(point, direction, triangle);
         if(intersect.isExisting && intersect.distance < closestDistance) {
@@ -331,7 +324,7 @@ vec3 tracePath(vec3 startPoint, vec3 startDirection) {
     vec3 throughput = vec3(1.0f);
 
     for(int depth = 0; depth < MAX_BOUNCES; depth++) {
-        Intersect hit = findClosestIntersect(point, direction, depth == 0);
+        Intersect hit = findClosestIntersect(point, direction);
 
         if(!hit.isExisting) {
             break;
