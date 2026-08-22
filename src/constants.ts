@@ -1,14 +1,18 @@
 export const IS_PATHTRACING = false;
 
 // Material encoding packed as vec3(x = material type, y = index of refraction, z = opacity)
+// Shared between scene data (src/constants.ts) and the path tracer shader.
 export const MATERIAL_DIFFUSE = 0;
 export const MATERIAL_MIRROR = 1;
 export const MATERIAL_GLASS = 2;
+export const MATERIAL_EMISSIVE = 3;
 
 export const DEFAULT_IOR = 1.0;
 export const DEFAULT_OPACITY = 0.0;
 export const GLASS_IOR = 1.33;
 export const GLASS_OPACITY = 0.05;
+
+const diffuseMaterial = new Float32Array([MATERIAL_DIFFUSE, DEFAULT_IOR, DEFAULT_OPACITY]);
 
 const triangles = [
   {
@@ -17,6 +21,7 @@ const triangles = [
     vertex3: new Float32Array([0.0, 0.0, 1.0]),
     normal: new Float32Array([1.0, 0.0, 0.0]),
     color: new Float32Array([0.8, 0.0, 0.0]),
+    material: diffuseMaterial,
   },
   {
     vertex1: new Float32Array([0.0, 1.0, -1.0]),
@@ -24,6 +29,7 @@ const triangles = [
     vertex3: new Float32Array([0.0, 0.0, 1.0]),
     normal: new Float32Array([1.0, 0.0, 0.0]),
     color: new Float32Array([0.8, 0.0, 0.0]),
+    material: diffuseMaterial,
   },
 
   {
@@ -32,6 +38,7 @@ const triangles = [
     vertex3: new Float32Array([1.0, 0.0, 1.0]),
     normal: new Float32Array([-1.0, 0.0, 0.0]),
     color: new Float32Array([0.0, 0.0, 0.8]),
+    material: diffuseMaterial,
   },
   {
     vertex1: new Float32Array([1.0, 1.0, -1.0]),
@@ -39,6 +46,7 @@ const triangles = [
     vertex3: new Float32Array([1.0, 0.0, 1.0]),
     normal: new Float32Array([-1.0, 0.0, 0.0]),
     color: new Float32Array([0.0, 0.0, 0.8]),
+    material: diffuseMaterial,
   },
 
   {
@@ -47,6 +55,7 @@ const triangles = [
     vertex3: new Float32Array([0.0, 1.0, 1.0]),
     normal: new Float32Array([0.0, 0.0, -1.0]),
     color: new Float32Array([1.0, 1.0, 1.0]),
+    material: diffuseMaterial,
   },
   {
     vertex1: new Float32Array([1.0, 0.0, 1.0]),
@@ -54,6 +63,7 @@ const triangles = [
     vertex3: new Float32Array([0.0, 1.0, 1.0]),
     normal: new Float32Array([0.0, 0.0, -1.0]),
     color: new Float32Array([1.0, 1.0, 1.0]),
+    material: diffuseMaterial,
   },
 
   {
@@ -62,6 +72,7 @@ const triangles = [
     vertex3: new Float32Array([1.0, 1.0, -1.0]),
     normal: new Float32Array([0.0, -1.0, 0.0]),
     color: new Float32Array([0.8, 0.8, 0.8]),
+    material: diffuseMaterial,
   },
   {
     vertex1: new Float32Array([1.0, 1.0, -1.0]),
@@ -69,6 +80,7 @@ const triangles = [
     vertex3: new Float32Array([1.0, 1.0, 1.0]),
     normal: new Float32Array([0.0, -1.0, 0.0]),
     color: new Float32Array([0.8, 0.8, 0.8]),
+    material: diffuseMaterial,
   },
 
   {
@@ -77,6 +89,7 @@ const triangles = [
     vertex3: new Float32Array([0.0, 0.0, 1.0]),
     normal: new Float32Array([0.0, 1.0, 0.0]),
     color: new Float32Array([0.8, 0.8, 0.8]),
+    material: diffuseMaterial,
   },
   {
     vertex1: new Float32Array([1.0, 0.0, -1.0]),
@@ -84,6 +97,7 @@ const triangles = [
     vertex3: new Float32Array([0.0, 0.0, 1.0]),
     normal: new Float32Array([0.0, 1.0, 0.0]),
     color: new Float32Array([0.8, 0.8, 0.8]),
+    material: diffuseMaterial,
   },
 
   {
@@ -92,6 +106,7 @@ const triangles = [
     vertex3: new Float32Array([0.0, 1.0, -1.0]),
     normal: new Float32Array([0.0, 0.0, 1.0]),
     color: new Float32Array([0.0, 1.0, 0.0]),
+    material: diffuseMaterial,
   },
   {
     vertex1: new Float32Array([1.0, 0.0, -1.0]),
@@ -99,14 +114,17 @@ const triangles = [
     vertex3: new Float32Array([0.0, 1.0, -1.0]),
     normal: new Float32Array([0.0, 0.0, 1.0]),
     color: new Float32Array([0.0, 1.0, 0.0]),
+    material: diffuseMaterial,
   },
 
+  // Ceiling light panel: explicit emissive material instead of albedo > 1.0.
   {
     vertex1: new Float32Array([0.25, 0.96, -0.25]),
     vertex2: new Float32Array([0.75, 0.96, -0.25]),
     vertex3: new Float32Array([0.75, 0.96, 0.25]),
     normal: new Float32Array([0.0, -1.0, 0.0]),
     color: new Float32Array([2.0, 2.0, 2.0]),
+    material: new Float32Array([MATERIAL_EMISSIVE, 0.0, 0.0]),
   },
   {
     vertex1: new Float32Array([0.25, 0.96, -0.25]),
@@ -114,6 +132,7 @@ const triangles = [
     vertex3: new Float32Array([0.25, 0.96, 0.25]),
     normal: new Float32Array([0.0, -1.0, 0.0]),
     color: new Float32Array([2.0, 2.0, 2.0]),
+    material: new Float32Array([MATERIAL_EMISSIVE, 0.0, 0.0]),
   },
 ];
 
@@ -139,7 +158,7 @@ const ellipsoids = [
 ];
 
 const ELLIPSOID_VEC_VALUE_COUNT = 12;
-const TRIANGLE_VEC_VALUE_COUNT = 15;
+const TRIANGLE_VEC_VALUE_COUNT = 18;
 export const flattenedTriangles = new Float32Array(triangles.length * TRIANGLE_VEC_VALUE_COUNT);
 export const flattenedEllipsoids = new Float32Array(ellipsoids.length * ELLIPSOID_VEC_VALUE_COUNT);
 export const vertices = new Float32Array([-1, 1, -1, -1, 1, 1, -1, -1, 1, -1, 1, 1]);
@@ -159,6 +178,7 @@ triangles.forEach((triangle, i) => {
   flattenedTriangles.set(triangle.vertex3, offset + 6);
   flattenedTriangles.set(triangle.normal, offset + 9);
   flattenedTriangles.set(triangle.color, offset + 12);
+  flattenedTriangles.set(triangle.material, offset + 15);
 });
 
 ellipsoids.forEach((ellipsoid, i) => {

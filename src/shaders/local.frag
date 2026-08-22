@@ -5,7 +5,7 @@ precision highp float;
 #define ELLIPSOID_COUNT 5
 #define ELLIPSOID_VECTORS 4
 #define TRIANGLE_COUNT 14
-#define TRIANGLE_VECTORS 5
+#define TRIANGLE_VECTORS 6
 #define CLIP_VAL 0.00001
 
 #define AMBIENT 0.1

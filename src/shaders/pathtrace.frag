@@ -6,7 +6,7 @@ precision highp float;
 #define ELLIPSOID_COUNT 5
 #define ELLIPSOID_VECTORS 4
 #define TRIANGLE_COUNT 14
-#define TRIANGLE_VECTORS 5
+#define TRIANGLE_VECTORS 6
 #define LIGHT_SAMPLES 4
 #define P_BOUNCE 0.5
 #define CLIP_VAL 0.00001
@@ -16,6 +16,7 @@ precision highp float;
 #define MATERIAL_DIFFUSE 0
 #define MATERIAL_MIRROR 1
 #define MATERIAL_GLASS 2
+#define MATERIAL_EMISSIVE 3
 
 struct Light {
     vec3 position;
@@ -42,6 +43,7 @@ struct Triangle {
     vec3 vertex3;
     vec3 normal;
     vec3 color;
+    vec3 material;
 };
 
 struct Intersect {
@@ -73,7 +75,7 @@ Intersect calculateRayEllipsoidIntersect(vec3 point, vec3 direction, Ellipsoid e
 Intersect calculateRayTriangleIntersect(vec3 point, vec3 direction, Triangle triangle);
 Intersect findClosestIntersect(vec3 point, vec3 direction);
 QuadResult solveQuad(vec3 quads);
-bool isEmitter(float r, float g, float b);
+bool isEmitter(float materialType);
 float fresnelSchlick(float cosTheta, float ior);
 vec3 calculateReflection(vec3 incident, vec3 faceNormal);
 vec3 calculateRefraction(vec3 incident, vec3 faceNormal, float ior);
@@ -86,8 +88,11 @@ float getRand() {
     return texture(u_NoiseTexture, sampleCoord).r;
 }
 
-bool isEmitter(float r, float g, float b) {
-    return r > 1.0f || g > 1.0f || b > 1.0f;
+// Emissive surfaces are classified via an explicit material type (see
+// src/constants.ts), not by albedo exceeding 1.0.
+
+bool isEmitter(float materialType) {
+    return int(materialType + 0.5f) == MATERIAL_EMISSIVE;
 }
 
 float fresnelSchlick(float cosTheta, float ior) {
@@ -156,6 +161,7 @@ vec3 calculateDirectIllumination(vec3 point, vec3 normal, vec3 color) {
             triangle.vertex3 = u_Triangles[i * TRIANGLE_VECTORS + 2];
             triangle.normal = u_Triangles[i * TRIANGLE_VECTORS + 3];
             triangle.color = u_Triangles[i * TRIANGLE_VECTORS + 4];
+            triangle.material = u_Triangles[i * TRIANGLE_VECTORS + 5];
 
             Intersect shadowHit = calculateRayTriangleIntersect(shadowRayOrigin, lightDirection, triangle);
             if(shadowHit.isExisting && shadowHit.distance < lightDistance - SHADOW_CLIP) {
@@ -273,7 +279,7 @@ Intersect calculateRayTriangleIntersect(vec3 point, vec3 direction, Triangle tri
     }
 
     vec3 intersect = point + direction * term;
-    return Intersect(true, term, intersect, triangle.color, triangle.normal, vec3(0.0f));
+    return Intersect(true, term, intersect, triangle.color, triangle.normal, triangle.material);
 }
 
 Intersect findClosestIntersect(vec3 point, vec3 direction) {
@@ -355,7 +361,7 @@ vec3 tracePath(vec3 startPoint, vec3 startDirection) {
             break;
         }
 
-        if(isEmitter(hit.color.r, hit.color.g, hit.color.b)) {
+        if(isEmitter(hit.material.x)) {
             accumulated += throughput * hit.color;
             break;
         }
