@@ -2,6 +2,50 @@
 // stable quadratic solver. Included via `#include <intersection>` and
 // resolved at load time by resolveIncludes() in src/utils.ts.
 // Requires the structs/constants from `#include <common>`.
+// NOTE: forward declarations needed because these functions are defined
+// below their first call sites (regression from the #37 chunk extraction).
+QuadResult solveQuad(vec3 quads);
+Intersect calculateRayEllipsoidIntersect(vec3 point, vec3 direction, Ellipsoid ellipsoid);
+Intersect calculateRayTriangleIntersect(vec3 point, vec3 direction, Triangle triangle);
+
+// Issue #60 fix: findClosestIntersect was dropped during the #37 chunk
+// extraction; restored here (uses u_Triangles/u_Ellipsoids declared by the
+// importing fragment shader before this include).
+Intersect findClosestIntersect(vec3 point, vec3 direction) {
+    Intersect closestIntersect = Intersect(false, 0.0f, vec3(0.0f), vec3(0.0f), vec3(0.0f), vec3(0.0f));
+    float closestDistance = 1e20f;
+
+    for(int i = 0; i < TRIANGLE_COUNT; i++) {
+        Triangle triangle;
+        triangle.vertex1 = u_Triangles[i * TRIANGLE_VECTORS];
+        triangle.vertex2 = u_Triangles[i * TRIANGLE_VECTORS + 1];
+        triangle.vertex3 = u_Triangles[i * TRIANGLE_VECTORS + 2];
+        triangle.normal = u_Triangles[i * TRIANGLE_VECTORS + 3];
+        triangle.color = u_Triangles[i * TRIANGLE_VECTORS + 4];
+
+        Intersect intersect = calculateRayTriangleIntersect(point, direction, triangle);
+        if(intersect.isExisting && intersect.distance < closestDistance) {
+            closestIntersect = intersect;
+            closestDistance = intersect.distance;
+        }
+    }
+
+    for(int i = 0; i < ELLIPSOID_COUNT; i++) {
+        Ellipsoid ellipsoid;
+        ellipsoid.center = u_Ellipsoids[i * ELLIPSOID_VECTORS];
+        ellipsoid.radius = u_Ellipsoids[i * ELLIPSOID_VECTORS + 1];
+        ellipsoid.color = u_Ellipsoids[i * ELLIPSOID_VECTORS + 2];
+        ellipsoid.material = u_Ellipsoids[i * ELLIPSOID_VECTORS + 3];
+
+        Intersect intersect = calculateRayEllipsoidIntersect(point, direction, ellipsoid);
+        if(intersect.isExisting && intersect.distance < closestDistance) {
+            closestIntersect = intersect;
+            closestDistance = intersect.distance;
+        }
+    }
+
+    return closestIntersect;
+}
 
 Intersect calculateRayEllipsoidIntersect(vec3 point, vec3 direction, Ellipsoid ellipsoid) {
     vec3 firstResult = direction / ellipsoid.radius;

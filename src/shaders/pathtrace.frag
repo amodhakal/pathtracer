@@ -29,42 +29,6 @@ precision highp float;
 #define MATERIAL_CLEARCOAT 5
 #define MATERIAL_THINFILM 6
 
-struct Light {
-    vec3 position;
-    vec3 color;
-    vec3 normal;
-    vec2 size;
-};
-
-struct QuadResult {
-    int termCount;
-    vec2 terms;
-};
-
-struct Ellipsoid {
-    vec3 center;
-    vec3 radius;
-    vec3 color;
-    vec3 material;
-};
-
-struct Triangle {
-    vec3 vertex1;
-    vec3 vertex2;
-    vec3 vertex3;
-    vec3 normal;
-    vec3 color;
-};
-
-struct Intersect {
-    bool isExisting;
-    float distance;
-    vec3 intersect;
-    vec3 color;
-    vec3 normal;
-    vec3 material;
-};
-
 in vec2 v_WindowPixels;
 out vec4 outColor;
 
@@ -72,7 +36,6 @@ uniform vec3 u_Eye;
 uniform Light u_Light;
 uniform vec3 u_Ellipsoids[ELLIPSOID_COUNT * ELLIPSOID_VECTORS];
 uniform vec3 u_Triangles[TRIANGLE_COUNT * TRIANGLE_VECTORS];
-uniform float u_Time;
 uniform vec2 u_Resolution;
 uniform float u_FrameCount;
 uniform vec3 u_EnvTop;
