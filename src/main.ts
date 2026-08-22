@@ -4,7 +4,7 @@ import localFragCode from "./shaders/local.frag";
 import displayFragCode from "./shaders/display.frag";
 import noiseGenFragCode from "./shaders/noiseGen.frag";
 import { createProgram, createShader } from "./utils";
-import { vertices, flattenedTriangles, flattenedEllipsoids, light, eye } from "./constants";
+import { vertices, flattenedTriangles, flattenedEllipsoids, ELLIPSOID_COUNT, light, eye } from "./constants";
 
 // Issue #25: path tracing is the default mode on startup. This overrides the
 // stale IS_PATHTRACING export in constants.ts (which defaults to false).
@@ -35,10 +35,18 @@ if (!floatExt) {
 try {
   const vertexShader = createShader(gl, gl.VERTEX_SHADER, vertexCode);
 
-  const pathtraceShader = createShader(gl, gl.FRAGMENT_SHADER, pathtraceFragCode);
+  const pathtraceShader = createShader(
+    gl,
+    gl.FRAGMENT_SHADER,
+    pathtraceFragCode.replace("#define ELLIPSOID_COUNT 5", `#define ELLIPSOID_COUNT ${ELLIPSOID_COUNT}`)
+  );
   const pathtraceProgram = createProgram(gl, vertexShader, pathtraceShader);
 
-  const localShader = createShader(gl, gl.FRAGMENT_SHADER, localFragCode);
+  const localShader = createShader(
+    gl,
+    gl.FRAGMENT_SHADER,
+    localFragCode.replace("#define ELLIPSOID_COUNT 5", `#define ELLIPSOID_COUNT ${ELLIPSOID_COUNT}`)
+  );
   const localProgram = createProgram(gl, vertexShader, localShader);
 
   const displayShader = createShader(gl, gl.FRAGMENT_SHADER, displayFragCode);

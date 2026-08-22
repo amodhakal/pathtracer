@@ -138,10 +138,16 @@ const ellipsoids = [
   },
 ];
 
-const ELLIPSOID_VEC_VALUE_COUNT = 12;
+export const ELLIPSOID_COUNT = ellipsoids.length;
+// Upload stride: one vec4 slot per vec3 value. GLSL array uniforms of vec3 are
+// packed with a 4-float stride, so uploading only 12 floats per ellipsoid would
+// leave the last vec3 slot of each ellipsoid (and trailing ellipsoids when the
+// shader's ELLIPSOID_COUNT exceeds the scene data) reading uninitialized zeros.
+// Zero-padding keeps every uniform slot initialized.
+export const ELLIPSOID_UPLOAD_STRIDE = 16;
 const TRIANGLE_VEC_VALUE_COUNT = 15;
 export const flattenedTriangles = new Float32Array(triangles.length * TRIANGLE_VEC_VALUE_COUNT);
-export const flattenedEllipsoids = new Float32Array(ellipsoids.length * ELLIPSOID_VEC_VALUE_COUNT);
+export const flattenedEllipsoids = new Float32Array(ELLIPSOID_COUNT * ELLIPSOID_UPLOAD_STRIDE);
 export const vertices = new Float32Array([-1, 1, -1, -1, 1, 1, -1, -1, 1, -1, 1, 1]);
 export const eye = new Float32Array([0.5, 0.5, -0.4]);
 export const time = Date.now();
@@ -162,9 +168,9 @@ triangles.forEach((triangle, i) => {
 });
 
 ellipsoids.forEach((ellipsoid, i) => {
-  const offset = i * ELLIPSOID_VEC_VALUE_COUNT;
+  const offset = i * ELLIPSOID_UPLOAD_STRIDE;
   flattenedEllipsoids.set(ellipsoid.position, offset);
-  flattenedEllipsoids.set(ellipsoid.radius, offset + 3);
-  flattenedEllipsoids.set(ellipsoid.color, offset + 6);
-  flattenedEllipsoids.set(ellipsoid.material, offset + 9);
+  flattenedEllipsoids.set(ellipsoid.radius, offset + 4);
+  flattenedEllipsoids.set(ellipsoid.color, offset + 8);
+  flattenedEllipsoids.set(ellipsoid.material, offset + 12);
 });
