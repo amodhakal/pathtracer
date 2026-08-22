@@ -10,15 +10,10 @@
   },
   "devDependencies": {
     "typescript": "~5.9.3",
-    "vite": "npm:rolldown-vite@7.1.14"
+    "vite": "npm:rolldown-vite@7.1.14",
+    "vite-plugin-glsl": "^1.5.4"
   },
   "overrides": {
     "vite": "npm:rolldown-vite@7.1.14"
-  },
-  "dependencies": {
-    "@loaders.gl/core": "^4.4.4",
-    "@loaders.gl/gltf": "^4.4.4",
-    "gl-matrix": "^3.4.4",
-    "vite-plugin-glsl": "^1.5.4"
   }
 }
