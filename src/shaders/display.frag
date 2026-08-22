@@ -11,16 +11,24 @@ uniform sampler2D u_AccumTexture;
 uniform float u_FrameCount;
 // Issue #33: linear exposure control applied to the averaged radiance BEFORE
 // tone mapping, so exposure scales scene brightness rather than fighting the
-// Reinhard curve / gamma encode.
+// tone mapping curve / gamma encode.
 uniform float u_Exposure;
+
+// Issue #34: ACES filmic approximation (Narkowicz 2015) — replaces Reinhard.
+// Better highlights rolloff and saturation than plain Reinhard; input/output
+// are in linear space.
+vec3 acesFilmic(vec3 x) {
+    const float a = 2.51, b = 0.03, c = 2.43, d = 0.59, e = 0.14;
+    return clamp((x * (a * x + b)) / (x * (c * x + d) + e), 0.0, 1.0);
+}
 
 void main() {
     vec2 uv = (v_WindowPixels + 1.0) * 0.5;
     vec3 col = texture(u_AccumTexture, uv).rgb / max(u_FrameCount, 1.0);
     // Issue #33: exposure control first — multiply linear radiance by the
-    // exposure factor, then tone map (Reinhard) and gamma encode.
+    // exposure factor, then tone map (ACES filmic) and gamma encode.
     col *= u_Exposure;
-    col = col / (col + vec3(1.0));
+    col = acesFilmic(col);
     col = pow(col, vec3(1.0 / 2.2));
     outColor = vec4(col, 1.0);
 }
