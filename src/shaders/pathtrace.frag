@@ -82,7 +82,16 @@ int randIndex = 0;
 float getRand() {
     int idx = randIndex++;
     vec2 pixelCoord = (v_WindowPixels + 1.0) * 0.5;
-    vec2 sampleCoord = fract(pixelCoord + vec2(float(idx) * 0.6180339887498949, u_FrameCount * 0.7548776662466927));
+    // Walk the noise texture in both dimensions: each randIndex step advances
+    // x and y by different irrational offsets (plus a per-frame offset), so the
+    // full 2D extent of the noise texture is consumed instead of sampling a
+    // single row. Decorrelation across frames is doubly assured: the texture
+    // itself is regenerated every frame with a seed of
+    // FIXED_NOISE_SEED + frameCount, and the per-frame offsets here additionally
+    // shift sample coordinates within that regenerated texture.
+    vec2 sampleCoord = fract(pixelCoord
+        + vec2(float(idx) * 0.6180339887498949 + u_FrameCount * 0.7548776662466927,
+               float(idx) * 0.7548776662466927 + u_FrameCount * 0.6180339887498949));
     return texture(u_NoiseTexture, sampleCoord).r;
 }
 
