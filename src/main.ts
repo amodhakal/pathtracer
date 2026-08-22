@@ -110,7 +110,8 @@ try {
     textureHeight = height;
 
     // --- Noise Texture & FBO ---
-    noiseTexture = createTexture(width, height, gl.RGBA8, gl.RGBA, gl.UNSIGNED_BYTE);
+    // Issue #3: use a float texture so RNG values aren't quantized to 8 bits.
+    noiseTexture = createTexture(width, height, gl.RGBA32F, gl.RGBA, gl.FLOAT);
     noiseFBO = gl.createFramebuffer();
     gl.bindFramebuffer(gl.FRAMEBUFFER, noiseFBO);
     gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, noiseTexture, 0);
