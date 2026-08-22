@@ -192,6 +192,8 @@ try {
     // Issue #24: renamed from the misleading u_NoiseTexture — this pass samples
     // the accumulation result, not the noise texture.
     u_AccumTexture: gl.getUniformLocation(displayProgram, "u_AccumTexture")!,
+    // Issue #11: frame count used to divide the accumulated sum.
+    u_FrameCount: gl.getUniformLocation(displayProgram, "u_FrameCount")!,
   };
 
   function renderNoise() {
@@ -257,6 +259,9 @@ try {
     gl.activeTexture(gl.TEXTURE0);
     gl.bindTexture(gl.TEXTURE_2D, writeTex);
     gl.uniform1i(displayUniforms.u_AccumTexture, 0);
+    // Issue #11: accumulation buffers hold a sum; divide by the number of
+    // samples accumulated so far (frameCount + 1 for the pass just rendered).
+    gl.uniform1f(displayUniforms.u_FrameCount, frameCount + 1);
 
     gl.drawArrays(gl.TRIANGLES, 0, 6);
   }
