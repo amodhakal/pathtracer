@@ -81,7 +81,11 @@ int randIndex = 0;
 float getRand() {
     int idx = randIndex++;
     vec2 pixelCoord = (v_WindowPixels + 1.0) * 0.5;
-    vec2 sampleCoord = fract(pixelCoord + vec2(float(idx) * 0.6180339887498949, u_FrameCount * 0.7548776662466927));
+    vec2 offsets = vec2(
+        float(idx) * 0.6180339887498949,
+        u_FrameCount * 0.7548776662466927 + float(idx) * 0.2971213928707494
+    );
+    vec2 sampleCoord = fract(pixelCoord + offsets);
     return texture(u_NoiseTexture, sampleCoord).r;
 }
 
