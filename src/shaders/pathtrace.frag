@@ -432,10 +432,12 @@ void main() {
     vec3 sampleColor = tracePath(rayOrigin, rayDirection);
 
     vec2 uv = (v_WindowPixels + 1.0) * 0.5;
-    vec3 prevColor = texture(u_AccumTexture, uv).rgb;
+    vec3 prevSum = texture(u_AccumTexture, uv).rgb;
 
-    float weight = 1.0 / (u_FrameCount + 1.0);
-    vec3 accumulatedColor = mix(prevColor, sampleColor, weight);
+    // Issue #11: accumulate a SUM of radiance samples instead of a running
+    // average, so precision doesn't degrade as frameCount grows. The display
+    // pass divides by the frame count.
+    vec3 accumulatedSum = prevSum + sampleColor;
 
-    outColor = vec4(accumulatedColor, 1.0);
+    outColor = vec4(accumulatedSum, 1.0);
 }
