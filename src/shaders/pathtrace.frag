@@ -52,8 +52,8 @@ uniform float u_FocalDistance;
 
 // Issue #57: albedo and normal map texture arrays. Each scene triangle can
 // reference one albedo map (id in hit.textures.x) and one normal map
-// (hit.textures.y); -1 means "no texture". MAX_TEXTURES is the array bound.
-#define MAX_TEXTURES 4
+// (hit.textures.y); -1 means "no texture". MAX_TEXTURES is injected at
+// compile time from the texture source lists in textures.ts (issue #40).
 uniform sampler2D u_AlbedoTextures[MAX_TEXTURES];
 uniform sampler2D u_NormalTextures[MAX_TEXTURES];
 

@@ -10,12 +10,36 @@ import {
   MATERIAL_GLASS,
   MATERIAL_MIRROR,
   MATERIAL_THINFILM,
+  SCENE_ELLIPSOID_COUNT,
+  SCENE_ELLIPSOID_VECTORS,
+  SCENE_TRIANGLE_COUNT,
+  SCENE_TRIANGLE_VECTORS,
+  generateSceneDefines,
 } from "../src/constants";
 
-const TRIANGLE_VEC_VALUE_COUNT = 24;
-const ELLIPSOID_VEC_VALUE_COUNT = 12;
-const NUM_TRIANGLES = 14;
-const NUM_ELLIPSOIDS = 7;
+// Issue #40: buffer sizes are derived from the same metadata that feeds the
+// shader defines, so these tests no longer hardcode duplicate counts.
+const TRIANGLE_VEC_VALUE_COUNT = SCENE_TRIANGLE_VECTORS * 3;
+const ELLIPSOID_VEC_VALUE_COUNT = SCENE_ELLIPSOID_VECTORS * 3;
+const NUM_TRIANGLES = SCENE_TRIANGLE_COUNT;
+const NUM_ELLIPSOIDS = SCENE_ELLIPSOID_COUNT;
+
+describe("scene/shader metadata consistency (issue #40)", () => {
+  it("derives shader defines from the actual scene object counts", () => {
+    const defines = generateSceneDefines();
+    expect(defines.TRIANGLE_COUNT).toBe(NUM_TRIANGLES);
+    expect(defines.TRIANGLE_VECTORS).toBe(SCENE_TRIANGLE_VECTORS);
+    expect(defines.ELLIPSOID_COUNT).toBe(NUM_ELLIPSOIDS);
+    expect(defines.ELLIPSOID_VECTORS).toBe(SCENE_ELLIPSOID_VECTORS);
+    expect(defines.TRIANGLE_COUNT).toBeGreaterThan(0);
+    expect(defines.ELLIPSOID_COUNT).toBeGreaterThan(0);
+  });
+
+  it("sizes flattened buffers from the exported scene metadata", () => {
+    expect(flattenedTriangles.length).toBe(NUM_TRIANGLES * TRIANGLE_VEC_VALUE_COUNT);
+    expect(flattenedEllipsoids.length).toBe(NUM_ELLIPSOIDS * ELLIPSOID_VEC_VALUE_COUNT);
+  });
+});
 
 describe("constants / scene data", () => {
   it("flattens triangles into a correctly sized buffer", () => {
