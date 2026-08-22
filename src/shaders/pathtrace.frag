@@ -8,6 +8,52 @@ precision highp float;
 #define P_BOUNCE 0.5
 #define SHADOW_CLIP 0.001
 
+// Issue #35: firefly clamping — bound each sample's radiance before it is
+// accumulated, so rare high-energy spikes (fireflies) can't dominate the
+// running average. Applied per-sample in main(), not per-bounce.
+#define FIREFLY_CLAMP 10.0
+
+// Material encoding packed as vec3(x = material type, y = IOR, z = opacity)
+#define MATERIAL_DIFFUSE 0
+#define MATERIAL_MIRROR 1
+#define MATERIAL_GLASS 2
+
+struct Light {
+    vec3 position;
+    vec3 color;
+    vec3 normal;
+    vec2 size;
+};
+
+struct QuadResult {
+    int termCount;
+    vec2 terms;
+};
+
+struct Ellipsoid {
+    vec3 center;
+    vec3 radius;
+    vec3 color;
+    vec3 material;
+};
+
+struct Triangle {
+    vec3 vertex1;
+    vec3 vertex2;
+    vec3 vertex3;
+    vec3 normal;
+    vec3 color;
+};
+
+struct Intersect {
+    bool isExisting;
+    float distance;
+    vec3 intersect;
+    vec3 color;
+    vec3 normal;
+    vec3 material;
+};
+
 in vec2 v_WindowPixels;
 out vec4 outColor;
 
@@ -257,6 +303,15 @@ void main() {
     vec3 rayDirection = normalize(targetPoint - rayOrigin);
 
     vec3 sampleColor = tracePath(rayOrigin, rayDirection);
+
+    // Issue #35: clamp fireflies on the per-sample radiance BEFORE accumulation.
+    // Scale-preserving clamp: if luminance exceeds FIREFLY_CLAMP, scale all
+    // components down uniformly so hue is preserved and spikes stay bounded
+    // while the average remains approximately unbiased.
+    float sampleLuminance = dot(sampleColor, vec3(0.2126f, 0.7152f, 0.0722f));
+    if(sampleLuminance > FIREFLY_CLAMP) {
+        sampleColor *= FIREFLY_CLAMP / sampleLuminance;
+    }
 
     vec2 uv = (v_WindowPixels + 1.0) * 0.5;
     vec3 prevSum = texture(u_AccumTexture, uv).rgb;
