@@ -360,22 +360,17 @@ vec3 sampleBounceDirection(vec3 normal) {
     vec3 tangent = normalize(cross(basis, normal));
     vec3 bitangent = cross(normal, tangent);
 
-    const int MAX_ITERS = 32;
-    vec3 result = normalize(tangent + bitangent + normal);
-    for(int i = 0; i < MAX_ITERS; i++) {
-        float x = getRand() * 2.0f - 1.0f;
-        float y = getRand() * 2.0f - 1.0f;
-        float z = getRand() * 2.0f;
-        vec3 local = vec3(x, y, z);
+    // Issue #30: cosine-weighted hemisphere sampling — sample the unit disk
+    // and project up, giving a direction density proportional to cos(theta)
+    // about the normal. No rejection loop needed; the BRDF's cosine factor
+    // cancels the pdf for Lambertian surfaces.
+    float r = sqrt(getRand());
+    float phi = 6.28318530718f * getRand();
+    float x = r * cos(phi);
+    float y = r * sin(phi);
+    float z = sqrt(max(0.0f, 1.0f - x * x - y * y));
 
-        if(dot(local, local) <= 1.0f) {
-            local = normalize(local);
-            result = local.x * tangent + local.y * bitangent + local.z * normal;
-            break;
-        }
-    }
-
-    return result;
+    return x * tangent + y * bitangent + z * normal;
 }
 
 vec3 tracePath(vec3 startPoint, vec3 startDirection) {
