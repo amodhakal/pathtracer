@@ -3,11 +3,11 @@
 // load time by resolveIncludes() in src/utils.ts.
 
 #define MAX_TERM_COUNT 2
-#define ELLIPSOID_COUNT 7
-#define ELLIPSOID_VECTORS 4
-#define TRIANGLE_COUNT 14
-// Issue #57: 3 vertices + normal + color + 2 packed UV slots + texture id.
-#define TRIANGLE_VECTORS 8
+// Issue #40: TRIANGLE_COUNT / TRIANGLE_VECTORS / ELLIPSOID_COUNT /
+// ELLIPSOID_VECTORS are no longer hardcoded here — they are injected as
+// GLSL #defines at program-compile time by createPrograms() from the actual
+// scene data (generateSceneDefines() in src/constants.ts), eliminating the
+// shader/scene metadata mismatch risk.
 #define CLIP_VAL 0.00001
 
 // Issue #14: single scale-dependent epsilon for geometric bias — used both

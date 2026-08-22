@@ -220,10 +220,42 @@ const ellipsoids = [
   },
 ];
 
-const TRIANGLE_VEC_VALUE_COUNT = 24; // Issue #57: was 15; now includes UVs + texture ids.
-const ELLIPSOID_VEC_VALUE_COUNT = 12;
+// Issue #40: scene metadata exported as the single source of truth for the
+// shader-side geometry bounds. These feed generateSceneDefines() below, which
+// injects them as GLSL #defines at program-compile time — so the shader's
+// uniform array sizes are derived from the actual scene data instead of being
+// hand-maintained duplicates in chunks/common.glsl (the old mismatch risk:
+// editing the scene here without bumping the GLSL defines silently truncated
+// geometry or read out of bounds).
+export const SCENE_TRIANGLE_COUNT = triangles.length;
+export const SCENE_TRIANGLE_VECTORS = 8; // 3 verts + normal + color + 2 UV slots + tex ids
+export const SCENE_ELLIPSOID_COUNT = ellipsoids.length;
+export const SCENE_ELLIPSOID_VECTORS = 4;
+export const TRIANGLE_VEC_VALUE_COUNT = SCENE_TRIANGLE_VECTORS * 3;
+export const ELLIPSOID_VEC_VALUE_COUNT = SCENE_ELLIPSOID_VECTORS * 3;
+
 export const flattenedTriangles = new Float32Array(triangles.length * TRIANGLE_VEC_VALUE_COUNT);
 export const flattenedEllipsoids = new Float32Array(ellipsoids.length * ELLIPSOID_VEC_VALUE_COUNT);
+
+export interface SceneDefines {
+  TRIANGLE_COUNT: number;
+  TRIANGLE_VECTORS: number;
+  ELLIPSOID_COUNT: number;
+  ELLIPSOID_VECTORS: number;
+}
+
+// Builds the GLSL #define block injected into every shader that includes the
+// common chunk. Kept next to the scene data so adding a triangle or ellipsoid
+// can never drift out of sync with the shader metadata.
+export function generateSceneDefines(): SceneDefines {
+  return {
+    TRIANGLE_COUNT: SCENE_TRIANGLE_COUNT,
+    TRIANGLE_VECTORS: SCENE_TRIANGLE_VECTORS,
+    ELLIPSOID_COUNT: SCENE_ELLIPSOID_COUNT,
+    ELLIPSOID_VECTORS: SCENE_ELLIPSOID_VECTORS,
+  };
+}
+
 export const vertices = new Float32Array([-1, 1, -1, -1, 1, 1, -1, -1, 1, -1, 1, 1]);
 export const eye = new Float32Array([0.5, 0.5, -0.4]);
 export const time = Date.now();
