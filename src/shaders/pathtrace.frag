@@ -11,6 +11,7 @@ precision highp float;
 #define P_BOUNCE 0.5
 #define CLIP_VAL 0.00001
 #define SHADOW_CLIP 0.001
+#define PI 3.14159265358979
 
 // Material encoding packed as vec3(x = material type, y = IOR, z = opacity)
 #define MATERIAL_DIFFUSE 0
@@ -187,27 +188,23 @@ vec3 calculateDirectIllumination(vec3 point, vec3 normal, vec3 color) {
     return accumulated / float(LIGHT_SAMPLES);
 }
 
+// Cosine-weighted hemisphere sampling (Malley's method): sample a point
+// uniformly on the unit disk and project it onto the hemisphere. The
+// resulting density is p(w) = cos(theta) / PI, which matches how callers
+// weight the bounce by dot(normal, w).
 vec3 sampleBounceDirection(vec3 normal) {
     vec3 basis = abs(normal.x) > 0.9f ? vec3(0.0f, 1.0f, 0.0f) : vec3(1.0f, 0.0f, 0.0f);
     vec3 tangent = normalize(cross(basis, normal));
     vec3 bitangent = cross(normal, tangent);
 
-    const int MAX_ITERS = 32;
-    vec3 result = normalize(tangent + bitangent + normal);
-    for(int i = 0; i < MAX_ITERS; i++) {
-        float x = getRand() * 2.0f - 1.0f;
-        float y = getRand() * 2.0f - 1.0f;
-        float z = getRand() * 2.0f;
-        vec3 local = vec3(x, y, z);
+    float r = sqrt(getRand());
+    float phi = 2.0f * PI * getRand();
 
-        if(dot(local, local) <= 1.0f) {
-            local = normalize(local);
-            result = local.x * tangent + local.y * bitangent + local.z * normal;
-            break;
-        }
-    }
+    float x = r * cos(phi);
+    float y = r * sin(phi);
+    float z = sqrt(max(0.0f, 1.0f - x * x - y * y));
 
-    return result;
+    return x * tangent + y * bitangent + z * normal;
 }
 
 Intersect calculateRayEllipsoidIntersect(vec3 point, vec3 direction, Ellipsoid ellipsoid) {
