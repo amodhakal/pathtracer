@@ -9,7 +9,7 @@ import { vertices, flattenedTriangles, flattenedEllipsoids, light, eye } from ".
 // Issue #25: path tracing is the default mode on startup. This overrides the
 // stale IS_PATHTRACING export in constants.ts (which defaults to false).
 const DEFAULT_PATH_TRACING = true;
-let pathTracingEnabled = DEFAULT_PATH_TRACING;
+const pathTracingEnabled = DEFAULT_PATH_TRACING;
 
 const FRAME_COUNT = 12_000
 
@@ -208,6 +208,34 @@ try {
     u_FrameCount: gl.getUniformLocation(displayProgram, "u_FrameCount")!,
   };
 
+  // Issue #41: static uniforms (scene data + sampler bindings) are uploaded
+  // once at init instead of every frame. Only truly per-frame values (seed,
+  // frameCount, resolution) are uploaded in the render functions.
+  gl.useProgram(pathtraceProgram);
+  gl.uniform3fv(pathtraceUniforms.u_Eye, eye);
+  gl.uniform3fv(pathtraceUniforms.u_Light.position, light.position);
+  gl.uniform3fv(pathtraceUniforms.u_Light.color, light.color);
+  gl.uniform3fv(pathtraceUniforms.u_Light.normal, light.normal);
+  gl.uniform2fv(pathtraceUniforms.u_Light.size, light.size);
+  // WebGL2 note: uniform3fv over a vec3 arr[N] uploads a contiguous
+  // 12-float stride — no vec4 padding needed.
+  gl.uniform3fv(pathtraceUniforms.u_Ellipsoids, flattenedEllipsoids);
+  gl.uniform3fv(pathtraceUniforms.u_Triangles, flattenedTriangles);
+  gl.uniform1i(pathtraceUniforms.u_NoiseTexture, 0);
+  gl.uniform1i(pathtraceUniforms.u_AccumTexture, 1);
+
+  gl.useProgram(displayProgram);
+  gl.uniform1i(displayUniforms.u_AccumTexture, 0);
+
+  gl.useProgram(localProgram);
+  gl.uniform3fv(localUniforms.u_Eye, eye);
+  gl.uniform3fv(localUniforms.u_Light.position, light.position);
+  gl.uniform3fv(localUniforms.u_Light.color, light.color);
+  gl.uniform3fv(localUniforms.u_Light.normal, light.normal);
+  gl.uniform2fv(localUniforms.u_Light.size, light.size);
+  gl.uniform3fv(localUniforms.u_Ellipsoids, flattenedEllipsoids);
+  gl.uniform3fv(localUniforms.u_Triangles, flattenedTriangles);
+
   function renderNoise() {
     if (!gl) return;
     gl.bindFramebuffer(gl.FRAMEBUFFER, noiseFBO);
@@ -222,7 +250,6 @@ try {
     const FIXED_NOISE_SEED = 19700101.0;
     gl.uniform1f(noiseUniforms.u_Seed, FIXED_NOISE_SEED + frameCount);
     gl.uniform2f(noiseUniforms.u_Resolution, textureWidth, textureHeight);
-
     gl.drawArrays(gl.TRIANGLES, 0, 6);
   }
 
@@ -235,23 +262,16 @@ try {
     gl.enableVertexAttribArray(posLocPathtrace);
     gl.vertexAttribPointer(posLocPathtrace, 2, gl.FLOAT, false, 0, 0);
 
-    // Bind noiseTexture to unit 0
+    // Issue #41: texture unit bindings are static and set once at init.
     gl.activeTexture(gl.TEXTURE0);
     gl.bindTexture(gl.TEXTURE_2D, noiseTexture);
-    gl.uniform1i(pathtraceUniforms.u_NoiseTexture, 0);
 
     // Bind read accumulation texture to unit 1
     gl.activeTexture(gl.TEXTURE1);
     gl.bindTexture(gl.TEXTURE_2D, readTex);
-    gl.uniform1i(pathtraceUniforms.u_AccumTexture, 1);
 
-    gl.uniform3fv(pathtraceUniforms.u_Eye, eye);
-    gl.uniform3fv(pathtraceUniforms.u_Light.position, light.position);
-    gl.uniform3fv(pathtraceUniforms.u_Light.color, light.color);
-    gl.uniform3fv(pathtraceUniforms.u_Light.normal, light.normal);
-    gl.uniform2fv(pathtraceUniforms.u_Light.size, light.size);
-    gl.uniform3fv(pathtraceUniforms.u_Ellipsoids, flattenedEllipsoids);
-    gl.uniform3fv(pathtraceUniforms.u_Triangles, flattenedTriangles);
+    // Issue #41: static scene uniforms + sampler bindings are uploaded once
+    // at init; only dynamic values are uploaded per frame here.
     gl.uniform2f(pathtraceUniforms.u_Resolution, textureWidth, textureHeight);
     gl.uniform1f(pathtraceUniforms.u_FrameCount, frameCount);
 
@@ -270,7 +290,6 @@ try {
 
     gl.activeTexture(gl.TEXTURE0);
     gl.bindTexture(gl.TEXTURE_2D, writeTex);
-    gl.uniform1i(displayUniforms.u_AccumTexture, 0);
     // Issue #11: accumulation buffers hold a sum; divide by the number of
     // samples accumulated so far (frameCount + 1 for the pass just rendered).
     gl.uniform1f(displayUniforms.u_FrameCount, frameCount + 1);
@@ -287,13 +306,8 @@ try {
     gl.enableVertexAttribArray(posLocLocal);
     gl.vertexAttribPointer(posLocLocal, 2, gl.FLOAT, false, 0, 0);
 
-    gl.uniform3fv(localUniforms.u_Eye, eye);
-    gl.uniform3fv(localUniforms.u_Light.position, light.position);
-    gl.uniform3fv(localUniforms.u_Light.color, light.color);
-    gl.uniform3fv(localUniforms.u_Light.normal, light.normal);
-    gl.uniform2fv(localUniforms.u_Light.size, light.size);
-    gl.uniform3fv(localUniforms.u_Ellipsoids, flattenedEllipsoids);
-    gl.uniform3fv(localUniforms.u_Triangles, flattenedTriangles);
+    // Issue #41: static scene uniforms are uploaded once at init; only the
+    // dynamic resolution is uploaded here (it depends on canvas size).
     gl.uniform2f(localUniforms.u_Resolution, canvas.width, canvas.height);
 
     gl.drawArrays(gl.TRIANGLES, 0, 6);
