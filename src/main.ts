@@ -4,9 +4,14 @@ import localFragCode from "./shaders/local.frag";
 import displayFragCode from "./shaders/display.frag";
 import noiseGenFragCode from "./shaders/noiseGen.frag";
 import { createProgram, createShader } from "./utils";
-import { vertices, time, flattenedTriangles, flattenedEllipsoids, light, IS_PATHTRACING } from "./constants";
+import { vertices, flattenedTriangles, flattenedEllipsoids, light } from "./constants";
 import { load } from "@loaders.gl/core";
 import { GLBLoader } from "@loaders.gl/gltf";
+
+// Issue #25: path tracing is the default mode on startup. This overrides the
+// stale IS_PATHTRACING export in constants.ts (which defaults to false).
+const DEFAULT_PATH_TRACING = true;
+let pathTracingEnabled = DEFAULT_PATH_TRACING;
 
 const FRAME_COUNT = 12_000
 
@@ -155,7 +160,8 @@ try {
     },
     u_Ellipsoids: gl.getUniformLocation(pathtraceProgram, "u_Ellipsoids")!,
     u_Triangles: gl.getUniformLocation(pathtraceProgram, "u_Triangles")!,
-    u_Time: gl.getUniformLocation(pathtraceProgram, "u_Time")!,
+    // NOTE: shader-side u_Time declaration removed in pt/prng-sampling; the TS-side
+    // dead uniform lookup and per-frame upload were removed here (issue #15).
     u_Resolution: gl.getUniformLocation(pathtraceProgram, "u_Resolution")!,
     u_FrameCount: gl.getUniformLocation(pathtraceProgram, "u_FrameCount")!,
     u_NoiseTexture: gl.getUniformLocation(pathtraceProgram, "u_NoiseTexture")!,
@@ -182,7 +188,9 @@ try {
 
 
   const displayUniforms = {
-    u_NoiseTexture: gl.getUniformLocation(displayProgram, "u_NoiseTexture")!,
+    // Issue #24: renamed from the misleading u_NoiseTexture — this pass samples
+    // the accumulation result, not the noise texture.
+    u_AccumTexture: gl.getUniformLocation(displayProgram, "u_AccumTexture")!,
   };
 
   function renderNoise() {
@@ -227,7 +235,6 @@ try {
     gl.uniform2fv(pathtraceUniforms.u_Light.size, light.size);
     gl.uniform3fv(pathtraceUniforms.u_Ellipsoids, flattenedEllipsoids);
     gl.uniform3fv(pathtraceUniforms.u_Triangles, flattenedTriangles);
-    gl.uniform1f(pathtraceUniforms.u_Time, Date.now() - time);
     gl.uniform2f(pathtraceUniforms.u_Resolution, textureWidth, textureHeight);
     gl.uniform1f(pathtraceUniforms.u_FrameCount, frameCount);
 
@@ -246,7 +253,7 @@ try {
 
     gl.activeTexture(gl.TEXTURE0);
     gl.bindTexture(gl.TEXTURE_2D, writeTex);
-    gl.uniform1i(displayUniforms.u_NoiseTexture, 0);
+    gl.uniform1i(displayUniforms.u_AccumTexture, 0);
 
     gl.drawArrays(gl.TRIANGLES, 0, 6);
   }
@@ -273,7 +280,7 @@ try {
   }
 
   function render() {
-    if (IS_PATHTRACING) {
+    if (pathTracingEnabled) {
       renderNoise();
       renderPathtrace();
       renderDisplay();
@@ -315,13 +322,20 @@ try {
 
     canvas.width = width;
     canvas.height = height;
-    setupFramebuffers(width, height);
+    // Issue #23: only rebuild noise/accumulation FBOs when path tracing is active.
+    // In local shading mode rendering goes straight to the backbuffer and the
+    // FBOs are unused, so rebuilding them (and resetting frameCount) is wasted work.
+    if (pathTracingEnabled) {
+      setupFramebuffers(width, height);
+    }
     startRenderLoop();
   }
 
   resizeCanvas();
+  // Issue #22: ResizeObserver alone handles canvas resizes — it fires whenever
+  // the element's size changes, which covers window resizes too. The duplicate
+  // window "resize" listener was removed.
   new ResizeObserver(resizeCanvas).observe(canvas);
-  window.addEventListener("resize", resizeCanvas);
   startRenderLoop();
 } catch (err) {
   console.error("Error: ", err);
