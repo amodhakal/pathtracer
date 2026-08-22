@@ -207,6 +207,8 @@ try {
     u_AccumTexture: gl.getUniformLocation(displayProgram, "u_AccumTexture")!,
     // Issue #11: frame count used to divide the accumulated sum.
     u_FrameCount: gl.getUniformLocation(displayProgram, "u_FrameCount")!,
+    // Issue #33: linear exposure applied before tone mapping.
+    u_Exposure: gl.getUniformLocation(displayProgram, "u_Exposure")!,
   };
 
   // Issue #41: static uniforms (scene data + sampler bindings) are uploaded
@@ -227,6 +229,8 @@ try {
 
   gl.useProgram(displayProgram);
   gl.uniform1i(displayUniforms.u_AccumTexture, 0);
+  // Issue #33: neutral exposure (1.0) — scales linear radiance before tone mapping.
+  gl.uniform1f(displayUniforms.u_Exposure, 1.0);
 
   gl.useProgram(localProgram);
   gl.uniform3fv(localUniforms.u_Eye, eye);
