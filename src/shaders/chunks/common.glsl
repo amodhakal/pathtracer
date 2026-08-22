@@ -10,6 +10,11 @@
 #define TRIANGLE_VECTORS 8
 #define CLIP_VAL 0.00001
 
+// Issue #14: single scale-dependent epsilon for geometric bias — used both
+// for offsetting new ray origins off surfaces and for clipping shadow-ray
+// distances, so the two never disagree.
+#define RAY_EPSILON 0.001
+
 // Material encoding packed as vec3(x = material type, y = IOR, z = opacity)
 // Issue #55: extended encoding — y/z take material-specific meanings:
 //   GGX       : y = roughness, z = metalness

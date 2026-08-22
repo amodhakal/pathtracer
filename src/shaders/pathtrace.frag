@@ -6,7 +6,9 @@ precision highp float;
 #define MAX_BOUNCES 200
 #define LIGHT_SAMPLES 4
 #define P_BOUNCE 0.5
-#define SHADOW_CLIP 0.001
+// Issue #14: use the shared RAY_EPSILON from common.glsl for all scale-dependent
+// geometric bias (ray-origin offsets and shadow-ray distance clipping).
+#define SHADOW_CLIP RAY_EPSILON
 
 // Issue #35: firefly clamping — bound each sample's radiance before it is
 // accumulated, so rare high-energy spikes (fireflies) can't dominate the
@@ -423,7 +425,7 @@ vec3 tracePath(vec3 startPoint, vec3 startDirection) {
 
         if(materialType == MATERIAL_MIRROR) {
             direction = calculateReflection(direction, hit.normal);
-            point = hit.intersect + hit.normal * CLIP_VAL;
+            point = hit.intersect + hit.normal * RAY_EPSILON;
             throughput *= hit.color;
             suppressEnvHit = false;
 
@@ -454,7 +456,7 @@ vec3 tracePath(vec3 startPoint, vec3 startDirection) {
             direction = isReflecting ? reflected : refracted;
             suppressEnvHit = false;
             vec3 travelSide = dot(direction, hit.normal) < 0.0f ? -hit.normal : hit.normal;
-            point = hit.intersect + travelSide * CLIP_VAL;
+            point = hit.intersect + travelSide * RAY_EPSILON;
             throughput *= mix(vec3(1.0f), hit.color, opacity);
 
             if(depth > 1 && getRand() < P_BOUNCE) {
@@ -588,7 +590,7 @@ vec3 tracePath(vec3 startPoint, vec3 startDirection) {
             break;
         }
 
-        point = hit.intersect + hit.normal * CLIP_VAL;
+        point = hit.intersect + hit.normal * RAY_EPSILON;
         direction = bounceDirection;
     }
 
