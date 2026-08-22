@@ -94,7 +94,7 @@ vec3 sampleBounceDirection(vec3 normal);
 bool isEmitter(float r, float g, float b);
 float fresnelSchlick(float cosTheta, float ior);
 vec3 calculateReflection(vec3 incident, vec3 faceNormal);
-vec3 calculateRefraction(vec3 incident, vec3 faceNormal, float ior);
+vec3 calculateRefraction(vec3 incident, vec3 faceNormal, float ior, out bool isTIR);
 
 int randIndex = 0;
 float getRand() {
@@ -122,7 +122,8 @@ vec3 calculateReflection(vec3 incident, vec3 faceNormal) {
     return incident - 2.0f * dot(faceNormal, incident) * faceNormal;
 }
 
-vec3 calculateRefraction(vec3 incident, vec3 faceNormal, float ior) {
+vec3 calculateRefraction(vec3 incident, vec3 faceNormal, float ior, out bool isTIR) {
+    isTIR = false;
     float entering = dot(incident, faceNormal) < 0.0f ? 1.0f : 0.0f;
     vec3 n = entering > 0.5f ? faceNormal : -faceNormal;
     float eta = entering > 0.5f ? 1.0f / ior : ior;
@@ -130,6 +131,7 @@ vec3 calculateRefraction(vec3 incident, vec3 faceNormal, float ior) {
     float cosI = -dot(n, incident);
     float sinT2 = eta * eta * (1.0f - cosI * cosI);
     if(sinT2 >= 1.0f) {
+        isTIR = true;
         return vec3(0.0f);
     }
 
@@ -439,13 +441,14 @@ vec3 tracePath(vec3 startPoint, vec3 startDirection) {
         if(materialType == MATERIAL_GLASS) {
             float opacity = hit.material.z;
 
-            vec3 refracted = calculateRefraction(direction, hit.normal, hit.material.y);
+            bool isTIR;
+            vec3 refracted = calculateRefraction(direction, hit.normal, hit.material.y, isTIR);
             vec3 reflected = calculateReflection(direction, hit.normal);
 
             float cosTheta = abs(dot(hit.normal, direction));
             float fresnel = fresnelSchlick(cosTheta, hit.material.y);
 
-            bool isReflecting = refracted == vec3(0.0f) || getRand() < fresnel;
+            bool isReflecting = isTIR || getRand() < fresnel;
             direction = isReflecting ? reflected : refracted;
             suppressEnvHit = false;
             vec3 travelSide = dot(direction, hit.normal) < 0.0f ? -hit.normal : hit.normal;
