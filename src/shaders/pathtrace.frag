@@ -137,6 +137,20 @@ vec3 calculateDirectIllumination(vec3 point, vec3 normal, vec3 color) {
         float lightDistance = length(pointToLight);
         vec3 lightDirection = pointToLight / lightDistance;
 
+        // Issue #49: reject back-facing samples before tracing any shadow
+        // rays — if the shading point faces away from the light sample, the
+        // geometry term is zero and occlusion is irrelevant.
+        float ndotl = max(dot(normal, lightDirection), 0.0);
+        float cosLight = max(dot(lightNormal, -lightDirection), 0.0);
+        if(ndotl <= 0.0 || cosLight <= 0.0) {
+            continue;
+        }
+
+        // Issue #49: occlusion-only any-hit queries instead of full closest-
+        // hit intersects. Each test skips normal/point/color construction and
+        // the loop exits on the first blocker found. Works with or without a
+        // BVH (issue #47) — a BVH traversal can replace the linear loops
+        // without changing these call sites.
         bool occluded = false;
 
         for(int i = 0; i < ELLIPSOID_COUNT && !occluded; i++) {
@@ -146,10 +160,7 @@ vec3 calculateDirectIllumination(vec3 point, vec3 normal, vec3 color) {
             ellipsoid.color = u_Ellipsoids[i * ELLIPSOID_VECTORS + 2];
             ellipsoid.material = u_Ellipsoids[i * ELLIPSOID_VECTORS + 3];
 
-            Intersect shadowHit = calculateRayEllipsoidIntersect(shadowRayOrigin, lightDirection, ellipsoid);
-            if(shadowHit.isExisting && shadowHit.distance < lightDistance - SHADOW_CLIP) {
-                occluded = true;
-            }
+            occluded = rayEllipsoidOccluded(shadowRayOrigin, lightDirection, lightDistance - SHADOW_CLIP, ellipsoid);
         }
 
         for(int i = 0; i < TRIANGLE_COUNT && !occluded; i++) {
@@ -160,25 +171,16 @@ vec3 calculateDirectIllumination(vec3 point, vec3 normal, vec3 color) {
             triangle.normal = u_Triangles[i * TRIANGLE_VECTORS + 3];
             triangle.color = u_Triangles[i * TRIANGLE_VECTORS + 4];
 
-            Intersect shadowHit = calculateRayTriangleIntersect(shadowRayOrigin, lightDirection, triangle);
-            if(shadowHit.isExisting && shadowHit.distance < lightDistance - SHADOW_CLIP) {
-                occluded = true;
-            }
+            occluded = rayTriangleOccluded(shadowRayOrigin, lightDirection, lightDistance - SHADOW_CLIP, triangle);
         }
 
         if(occluded) {
             continue;
         }
 
-        float ndotl = max(dot(normal, lightDirection), 0.0);
-        float cosLight = max(dot(lightNormal, -lightDirection), 0.0);
-
         // Area-to-area geometry term for uniform area sampling:
         // Lo = Le * brdf * cos(theta_i) * cos(theta_l) * V / (r^2 * pdf)
         // pdf = 1 / lightArea for uniform sampling over the quad.
-        if(ndotl <= 0.0 || cosLight <= 0.0) {
-            continue;
-        }
 
         float lightArea = 4.0f * u_Light.size.x * u_Light.size.y;
         float pdf = 1.0f / max(lightArea, CLIP_VAL);
