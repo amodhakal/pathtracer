@@ -3,7 +3,9 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
 const shaderDir = join(__dirname, "../src/shaders");
-const shaderFiles = readdirSync(shaderDir);
+const shaderFiles = readdirSync(shaderDir, { withFileTypes: true })
+  .filter((entry) => entry.isFile())
+  .map((entry) => entry.name);
 
 describe("shader sources", () => {
   it("ships all expected shader files", () => {
