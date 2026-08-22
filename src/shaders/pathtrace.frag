@@ -425,8 +425,15 @@ void main() {
     vec2 pos = v_WindowPixels.xy;
     pos.x *= u_Resolution.x / u_Resolution.y;
 
+    // Issue #12: sub-pixel jitter — offset by a random amount within the pixel
+    // each frame so averaging over accumulated frames converges to anti-aliasing.
+    // Pixel size in NDC is 2/resolution; pos.x is aspect-scaled, so scale x accordingly.
+    vec2 pixelSize = 2.0f / u_Resolution;
+    pixelSize.x *= u_Resolution.x / u_Resolution.y;
+    vec2 jitter = (vec2(getRand(), getRand()) - 0.5f) * pixelSize;
+
     vec3 rayOrigin = u_Eye;
-    vec3 targetPoint = vec3((pos.xy + 1.0f) * 0.5f, 0.0f);
+    vec3 targetPoint = vec3((pos.xy + jitter + 1.0f) * 0.5f, 0.0f);
     vec3 rayDirection = normalize(targetPoint - rayOrigin);
 
     vec3 sampleColor = tracePath(rayOrigin, rayDirection);
