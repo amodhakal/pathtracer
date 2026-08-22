@@ -13,7 +13,13 @@ let pathTracingEnabled = DEFAULT_PATH_TRACING;
 
 const FRAME_COUNT = 12_000
 
-const canvas = document.getElementById("canvas") as HTMLCanvasElement;
+const canvasElement = document.getElementById("canvas");
+if (!(canvasElement instanceof HTMLCanvasElement)) {
+  const message = "Could not find #canvas element in the document.";
+  alert(message);
+  throw new Error(message);
+}
+const canvas: HTMLCanvasElement = canvasElement;
 const gl = canvas.getContext("webgl2");
 if (!gl) {
   alert("WebGL2 not supported");
@@ -295,6 +301,7 @@ try {
         requestAnimationFrame(render);
       } else {
         renderLoopActive = false;
+        console.log(`Rendering complete after ${FRAME_COUNT} frames`);
       }
     } else {
       renderLocal();
