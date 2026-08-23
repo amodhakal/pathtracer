@@ -34,6 +34,16 @@ precision highp float;
 #define MATERIAL_EMISSIVE 4
 #define MATERIAL_CLEARCOAT 5
 #define MATERIAL_THINFILM 6
+// Issue #64: participating media (see chunks/common.glsl for the encoding).
+//   VOLUME : y = density (sigma_t), z = scattering albedo (sigma_s / sigma_t)
+#define MATERIAL_VOLUME 7
+
+// Issue #64: emission radiance per unit density inside an emissive medium
+// (u_VolumeEmission supplies the color; this scales its contribution).
+#define VOLUME_EMISSION_STRENGTH 1.0
+// Cap on scatter events inside media so an optically thick volume cannot
+// spin forever in the tracking loop (bounded, and RR keeps it unbiased).
+#define MAX_VOLUME_SCATTERS 64
 
 in vec2 v_WindowPixels;
 out vec4 outColor;
@@ -64,6 +74,23 @@ uniform sampler2D u_AccumTexture;
 // DOF); u_FocalDistance places the sharp focal plane along the view direction.
 uniform float u_ApertureRadius;
 uniform float u_FocalDistance;
+
+// ---- Issue #64: participating media (global fog) uniforms -----------------
+//
+// u_FogDensity is the extinction coefficient sigma_t of a homogeneous global
+// medium filling the scene. Setting it to 0 disables volumetrics entirely and
+// the transport reduces bit-for-bit to the previous surface-only integrator,
+// which is how non-volume scenes stay correct.
+uniform float u_FogDensity;
+// Single-scattering albedo sigma_s / sigma_t in [0,1]: 0 = purely absorbing
+// (smoke silhouette), 1 = purely scattering (conservative fog).
+uniform float u_FogScatterAlbedo;
+// Tint applied to scattered radiance (the medium's scattering color).
+uniform vec3 u_FogColor;
+// Emitted radiance per unit optical depth (glowing media, e.g. fire/plasma).
+uniform vec3 u_FogEmission;
+// Henyey-Greenstein anisotropy g in (-1,1): 0 = isotropic, >0 forward, <0 back.
+uniform float u_FogAnisotropy;
 
 // Issue #57: albedo and normal map texture arrays. Each scene triangle can
 // reference one albedo map (id in hit.textures.x) and one normal map
@@ -359,6 +386,8 @@ vec3 thinFilmReflectance(float cosTheta, float thicknessNm, float ior) {
 // emit hit.color * strength regardless of whether color exceeds 1.
 bool isEmissiveMaterial(vec3 material) {
     return int(material.x + 0.5f) == MATERIAL_EMISSIVE;
+}
+
 // Issue #56: procedural gradient environment map. Rays that escape the
 // scene pick up infinite-geometry radiance from this IBL instead of black.
 vec3 evaluateEnvironment(vec3 direction) {
@@ -522,6 +551,130 @@ vec3 sampleBounceDirection(vec3 normal) {
     return x * tangent + y * bitangent + z * normal;
 }
 
+// ---- Issue #64: volumetric path tracing ------------------------------------
+//
+// Radiative transfer in a participating medium adds three interactions to the
+// surface-only estimator: out-scattering + absorption (together extinction
+// sigma_t), in-scattering (sigma_s = albedo * sigma_t) and emission.
+//
+// Distance sampling. For a homogeneous medium the free-flight pdf is
+//   p(t) = sigma_t * exp(-sigma_t * t),
+// which we invert analytically: t = -ln(1 - u) / sigma_t. Because the medium
+// is homogeneous, analytic sampling is exact and no null-collision (delta-
+// tracking) rejection is required — delta tracking degenerates to this closed
+// form when the majorant equals the real density. The heterogeneous path is
+// kept structurally intact below (sampleMediumDistance returns the sampled
+// free-flight distance and the caller compares it against the surface hit
+// distance, exactly as a delta/ratio tracker would), so swapping in a density
+// field later only changes sampleMediumDistance/mediumTransmittance.
+//
+// Weighting. Sampling t from p(t) and scattering with probability equal to the
+// scattering albedo makes the estimator weight
+//   sigma_s * T(t) / (p(t) * P_scatter) = 1,
+// i.e. an unbiased, minimum-variance single-lobe estimator, so no explicit
+// transmittance factor has to be multiplied into the throughput on a scatter
+// event. On a surface event (t beyond the hit) the ratio T(d)/P(t > d) is
+// likewise 1 for a homogeneous medium.
+
+// Analytic free-flight distance for extinction `sigmaT`. Returns a huge value
+// when the medium is effectively vacuum so the caller always picks the surface.
+float sampleMediumDistance(float sigmaT) {
+    if(sigmaT <= 0.0f) {
+        return 1.0e30f;
+    }
+    float u = getRand();
+    // Guard log(0) — u is in [0,1); clamp keeps the log finite.
+    return -log(max(1.0f - u, CLIP_VAL)) / sigmaT;
+}
+
+// Beer-Lambert transmittance through `distance` of homogeneous medium. Used
+// for shadow/NEE rays, which must be attenuated rather than binary-occluded
+// once a medium is present (this is the "ratio tracking" estimator's closed
+// form for a homogeneous majorant).
+vec3 mediumTransmittance(float sigmaT, float distance) {
+    if(sigmaT <= 0.0f) {
+        return vec3(1.0f);
+    }
+    return vec3(exp(-sigmaT * max(distance, 0.0f)));
+}
+
+// Henyey-Greenstein phase function sampling. g = 0 reduces to isotropic
+// sampling on the sphere; the returned direction is already distributed
+// according to the phase function so the estimator weight stays 1.
+vec3 samplePhaseDirection(vec3 direction, float g) {
+    float u1 = getRand();
+    float u2 = getRand();
+    float phi = 6.283185307179586f * u2;
+
+    float cosTheta;
+    if(abs(g) < 1.0e-3f) {
+        // Isotropic: cosTheta uniform in [-1, 1].
+        cosTheta = 1.0f - 2.0f * u1;
+    } else {
+        float g2 = g * g;
+        float sqrTerm = (1.0f - g2) / max(1.0f + g - 2.0f * g * u1, CLIP_VAL);
+        cosTheta = -(1.0f + g2 - sqrTerm * sqrTerm) / max(2.0f * g, CLIP_VAL);
+        cosTheta = clamp(cosTheta, -1.0f, 1.0f);
+    }
+    float sinTheta = sqrt(max(1.0f - cosTheta * cosTheta, 0.0f));
+
+    // Build a frame around the incoming direction and rotate into world space.
+    vec3 forward = normalize(direction);
+    vec3 tangent, bitangent;
+    buildOrthonormalBasis(forward, tangent, bitangent);
+    return normalize(sinTheta * cos(phi) * tangent
+        + sinTheta * sin(phi) * bitangent
+        + cosTheta * forward);
+}
+
+// Single-scattering NEE from a medium point toward the area light. The phase
+// function replaces the BRDF and there is no cosine foreshortening term at a
+// volumetric vertex; the light-side geometry term is unchanged.
+vec3 sampleMediumDirectLight(vec3 point, vec3 wo, float g) {
+    vec3 lightNormal = normalize(u_Light.normal);
+    vec3 basis = abs(lightNormal.x) > 0.9f ? vec3(0.0f, 1.0f, 0.0f) : vec3(1.0f, 0.0f, 0.0f);
+    vec3 lightTangent = normalize(cross(basis, lightNormal));
+    vec3 lightBitangent = cross(lightNormal, lightTangent);
+
+    vec2 areaSample = vec2(getRand(), getRand());
+    vec3 lightPoint = u_Light.position
+        + lightTangent * ((areaSample.x - 0.5f) * 2.0f * u_Light.size.x)
+        + lightBitangent * ((areaSample.y - 0.5f) * 2.0f * u_Light.size.y);
+
+    vec3 toLight = lightPoint - point;
+    float lightDistance = length(toLight);
+    if(lightDistance < CLIP_VAL) {
+        return vec3(0.0f);
+    }
+    vec3 lightDirection = toLight / lightDistance;
+
+    float cosLight = max(dot(lightNormal, -lightDirection), 0.0f);
+    if(cosLight <= 0.0f) {
+        return vec3(0.0f);
+    }
+
+    if(bvhAnyHit(point, lightDirection, lightDistance - SHADOW_CLIP)) {
+        return vec3(0.0f);
+    }
+
+    // Henyey-Greenstein phase value for the sampled light direction.
+    float cosTheta = dot(normalize(wo), lightDirection);
+    float g2 = g * g;
+    float denom = max(1.0f + g2 - 2.0f * g * cosTheta, CLIP_VAL);
+    float phase = (1.0f - g2) / (12.566370614359172f * denom * sqrt(denom));
+
+    float lightArea = 4.0f * u_Light.size.x * u_Light.size.y;
+    float pdfArea = 1.0f / max(lightArea, CLIP_VAL);
+    float solidAngleConversion = cosLight / max(lightDistance * lightDistance, CLIP_VAL);
+
+    // Attenuate the light contribution by the medium's transmittance along the
+    // shadow ray (ratio-tracking closed form for a homogeneous medium).
+    vec3 transmittance = mediumTransmittance(u_FogDensity, lightDistance);
+
+    return u_Light.color * u_FogColor * phase * transmittance
+        * solidAngleConversion / pdfArea;
+}
+
 vec3 tracePath(vec3 startPoint, vec3 startDirection) {
     vec3 point = startPoint;
     vec3 direction = startDirection;
@@ -531,9 +684,66 @@ vec3 tracePath(vec3 startPoint, vec3 startDirection) {
     // accounted for by cosine-weighted NEE, so an escaping ray must not add
     // the env radiance again. Specular chains (mirror/glass/camera) keep it.
     bool suppressEnvHit = false;
+    // Issue #64: number of medium scatter events so far along this path.
+    int volumeScatters = 0;
 
     for(int depth = 0; depth < MAX_BOUNCES; depth++) {
         Intersect hit = findClosestIntersect(point, direction);
+
+        // ---- Issue #64: medium interaction test ----------------------------
+        //
+        // Sample a free-flight distance in the participating medium and race it
+        // against the surface hit. If the medium wins the ray scatters (or is
+        // absorbed) before reaching any geometry; otherwise transport continues
+        // to the surface exactly as before. With u_FogDensity == 0 the sampled
+        // distance is +inf, so non-volume scenes take the surface branch every
+        // time and the integrator is unchanged.
+        if(u_FogDensity > 0.0f && volumeScatters < MAX_VOLUME_SCATTERS) {
+            float surfaceDistance = hit.isExisting ? hit.distance : 1.0e30f;
+            float mediumDistance = sampleMediumDistance(u_FogDensity);
+
+            if(mediumDistance < surfaceDistance) {
+                vec3 scatterPoint = point + direction * mediumDistance;
+
+                // Volumetric emission: radiance added per collision, scaled by
+                // the medium's emission color (zero for non-emissive media).
+                accumulated += throughput * u_FogEmission * VOLUME_EMISSION_STRENGTH;
+
+                // Absorption vs. scattering: the single-scattering albedo is
+                // exactly the probability of surviving the collision as a
+                // scattering event, which makes the surviving path's weight 1.
+                float albedo = clamp(u_FogScatterAlbedo, 0.0f, 1.0f);
+                if(getRand() >= albedo) {
+                    break; // absorbed
+                }
+
+                // Single-scattering NEE from the medium vertex.
+                accumulated += throughput
+                    * sampleMediumDirectLight(scatterPoint, -direction, u_FogAnisotropy);
+
+                // Continue along a phase-function-sampled direction. Tint by
+                // the medium color so colored fog stays colored on multiple
+                // scattering events.
+                direction = samplePhaseDirection(direction, u_FogAnisotropy);
+                point = scatterPoint;
+                throughput *= u_FogColor;
+                // The scattered ray can legitimately reach the environment,
+                // and the volumetric NEE above only sampled the area light.
+                suppressEnvHit = false;
+                volumeScatters++;
+
+                if(depth > 1 && getRand() < P_BOUNCE) {
+                    break;
+                }
+                if(depth > 1) {
+                    throughput /= P_BOUNCE;
+                }
+                if(max(throughput.r, max(throughput.g, throughput.b)) < 0.001f) {
+                    break;
+                }
+                continue;
+            }
+        }
 
         if(!hit.isExisting) {
             if(!suppressEnvHit) {
@@ -552,6 +762,64 @@ vec3 tracePath(vec3 startPoint, vec3 startDirection) {
         }
 
         int materialType = int(hit.material.x + 0.5f);
+
+        // ---- Issue #64: bounded participating medium -----------------------
+        //
+        // A MATERIAL_VOLUME primitive is not a surface: it delimits a region of
+        // homogeneous medium (density in material.y, scattering albedo in
+        // material.z). On entry we march to the far side of the volume, sample a
+        // free-flight distance against that interior span, and either scatter
+        // inside it or pass straight through the boundary unrefracted. This is
+        // the same tracking loop as the global fog above, restricted to the
+        // object's interior, so the two compose without double counting.
+        if(materialType == MATERIAL_VOLUME) {
+            float sigmaT = max(hit.material.y, 0.0f);
+            float volumeAlbedo = clamp(hit.material.z, 0.0f, 1.0f);
+
+            // Step just inside the boundary and find the exit interface.
+            vec3 insidePoint = hit.intersect + direction * RAY_EPSILON;
+            Intersect exitHit = findClosestIntersect(insidePoint, direction);
+            float span = exitHit.isExisting ? exitHit.distance : 1.0e30f;
+
+            float mediumDistance = sampleMediumDistance(sigmaT);
+            if(mediumDistance < span && volumeScatters < MAX_VOLUME_SCATTERS) {
+                vec3 scatterPoint = insidePoint + direction * mediumDistance;
+
+                // Emission inside the bounded medium is tinted by the volume's
+                // own color, which keeps a glowing volume independent of fog.
+                accumulated += throughput * hit.color * u_FogEmission
+                    * VOLUME_EMISSION_STRENGTH;
+
+                if(getRand() >= volumeAlbedo) {
+                    break; // absorbed inside the volume
+                }
+
+                accumulated += throughput
+                    * hit.color
+                    * sampleMediumDirectLight(scatterPoint, -direction, u_FogAnisotropy);
+
+                direction = samplePhaseDirection(direction, u_FogAnisotropy);
+                point = scatterPoint;
+                throughput *= hit.color;
+                suppressEnvHit = false;
+                volumeScatters++;
+            } else {
+                // No collision inside the span: cross the boundary unchanged
+                // (the medium is index-matched, so no refraction happens).
+                point = insidePoint + direction * min(span + RAY_EPSILON, 1.0e29f);
+            }
+
+            if(depth > 1 && getRand() < P_BOUNCE) {
+                break;
+            }
+            if(depth > 1) {
+                throughput /= P_BOUNCE;
+            }
+            if(max(throughput.r, max(throughput.g, throughput.b)) < 0.001f) {
+                break;
+            }
+            continue;
+        }
 
         // Issue #55: decoupled emissive — emit regardless of color brightness.
         if(isEmissiveMaterial(hit.material)) {

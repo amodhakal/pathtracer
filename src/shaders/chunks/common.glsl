@@ -27,6 +27,12 @@
 #define MATERIAL_EMISSIVE 4
 #define MATERIAL_CLEARCOAT 5
 #define MATERIAL_THINFILM 6
+// Issue #64: participating media. An ellipsoid/box tagged MATERIAL_VOLUME is
+// not a surface — it bounds a homogeneous participating medium whose
+// scattering/absorption/emission are integrated by delta/ratio tracking.
+// Packed encoding: y = density (extinction sigma_t), z = scattering albedo
+// (sigma_s / sigma_t; 0 = purely absorbing, 1 = purely scattering).
+#define MATERIAL_VOLUME 7
 
 // Issue #21: proper pinhole camera model. The vertical FOV is chosen so the
 // new camera reproduces the legacy framing exactly: previously rays were

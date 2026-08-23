@@ -10,6 +10,8 @@ import {
   // Issue #58: thin-lens depth-of-field parameters.
   APERTURE_RADIUS,
   FOCAL_DISTANCE,
+  // Issue #64: participating media (volumetrics) scene option.
+  volumetrics,
 } from "./constants";
 import {
   computeCameraBasis,
@@ -124,6 +126,12 @@ export class Renderer {
       // Issue #58: thin-lens DOF.
       u_ApertureRadius: gl.getUniformLocation(programs.pathtrace, "u_ApertureRadius")!,
       u_FocalDistance: gl.getUniformLocation(programs.pathtrace, "u_FocalDistance")!,
+      // Issue #64: participating media. All static — uploaded once at init.
+      u_FogDensity: gl.getUniformLocation(programs.pathtrace, "u_FogDensity")!,
+      u_FogScatterAlbedo: gl.getUniformLocation(programs.pathtrace, "u_FogScatterAlbedo")!,
+      u_FogColor: gl.getUniformLocation(programs.pathtrace, "u_FogColor")!,
+      u_FogEmission: gl.getUniformLocation(programs.pathtrace, "u_FogEmission")!,
+      u_FogAnisotropy: gl.getUniformLocation(programs.pathtrace, "u_FogAnisotropy")!,
     };
     const localUniforms = {
       u_Eye: gl.getUniformLocation(programs.local, "u_Eye")!,
@@ -206,6 +214,14 @@ export class Renderer {
     // Issue #58: static thin-lens DOF parameters.
     gl.uniform1f(p.u_ApertureRadius, APERTURE_RADIUS);
     gl.uniform1f(p.u_FocalDistance, FOCAL_DISTANCE);
+    // Issue #64: static participating-media parameters. density === 0 makes
+    // the shader skip the medium branch entirely, so non-volume scenes are
+    // unaffected by this upload.
+    gl.uniform1f(p.u_FogDensity, volumetrics.density);
+    gl.uniform1f(p.u_FogScatterAlbedo, volumetrics.scatterAlbedo);
+    gl.uniform3fv(p.u_FogColor, volumetrics.color);
+    gl.uniform3fv(p.u_FogEmission, volumetrics.emission);
+    gl.uniform1f(p.u_FogAnisotropy, volumetrics.anisotropy);
 
     gl.useProgram(programs.display);
     gl.uniform1i(this.uniforms.displayUniforms.u_AccumTexture, 0);
@@ -246,6 +262,12 @@ export class Renderer {
       // Issue #58: thin-lens DOF.
       u_ApertureRadius: WebGLUniformLocation;
       u_FocalDistance: WebGLUniformLocation;
+      // Issue #64: participating media.
+      u_FogDensity: WebGLUniformLocation;
+      u_FogScatterAlbedo: WebGLUniformLocation;
+      u_FogColor: WebGLUniformLocation;
+      u_FogEmission: WebGLUniformLocation;
+      u_FogAnisotropy: WebGLUniformLocation;
     };
     localUniforms: {
       u_Eye: WebGLUniformLocation;
