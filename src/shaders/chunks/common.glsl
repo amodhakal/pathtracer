@@ -8,6 +8,9 @@
 // GLSL #defines at program-compile time by createPrograms() from the actual
 // scene data (generateSceneDefines() in src/constants.ts), eliminating the
 // shader/scene metadata mismatch risk.
+//
+// Issue #53: TRIANGLE_COUNT is overridden by the loaded GLB mesh's triangle
+// count when the GLTF scene is active (see src/programs.ts).
 #define CLIP_VAL 0.00001
 
 // Issue #14: single scale-dependent epsilon for geometric bias — used both

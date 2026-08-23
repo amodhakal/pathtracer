@@ -3,6 +3,10 @@
 // Issue #40: scene-derived metadata (geometry counts/strides) is injected as
 // GLSL #defines at compile time via generateSceneDefines(), so shader array
 // bounds always match the actual scene data in constants.ts.
+//
+// Issue #53: when a GLB mesh is loaded its triangle count replaces the
+// procedural scene's TRIANGLE_COUNT in that same define block, so the shader's
+// u_Triangles[] bound matches the uploaded mesh soup.
 import { createProgram, createShader, resolveIncludes } from "./utils";
 import { generateSceneDefines } from "./constants";
 import { albedoTextureSources, normalTextureSources } from "./textures";
@@ -17,8 +21,13 @@ export interface Programs {
   display: WebGLProgram;
 }
 
-function buildSceneDefineBlock(): string {
-  const defines = generateSceneDefines();
+/** Issue #53: `meshTriangleCount` (when non-null) overrides the procedural
+ *  scene's TRIANGLE_COUNT so the shader array bound matches the loaded mesh. */
+function buildSceneDefineBlock(meshTriangleCount: number | null): string {
+  const defines: Record<string, number> = { ...generateSceneDefines() };
+  if (meshTriangleCount !== null) {
+    defines.TRIANGLE_COUNT = meshTriangleCount;
+  }
   const lines = Object.entries(defines).map(([name, value]) => `#define ${name} ${value}`);
   // Issue #57/#40: the texture array bound must cover every declared texture.
   const maxTextures = Math.max(albedoTextureSources.length, normalTextureSources.length, 1);
@@ -26,10 +35,13 @@ function buildSceneDefineBlock(): string {
   return lines.join("\n");
 }
 
-export function createPrograms(gl: WebGL2RenderingContext): Programs {
+export function createPrograms(
+  gl: WebGL2RenderingContext,
+  meshTriangleCount: number | null = null,
+): Programs {
   const vertexShader = createShader(gl, gl.VERTEX_SHADER, vertexCode);
 
-  const sceneDefineBlock = buildSceneDefineBlock();
+  const sceneDefineBlock = buildSceneDefineBlock(meshTriangleCount);
 
   const withSceneDefines = (source: string): string =>
     source.replace(/^(\s*#version[^\n]*\n)/m, `$1\n${sceneDefineBlock}\n`);
