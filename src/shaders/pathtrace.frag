@@ -92,6 +92,15 @@ uniform vec3 u_FogEmission;
 // Henyey-Greenstein anisotropy g in (-1,1): 0 = isotropic, >0 forward, <0 back.
 uniform float u_FogAnisotropy;
 
+// Issue #61: surface next-event estimation toggle. Non-zero enables explicit
+// area sampling of the emissive scene primitives combined with the existing
+// BSDF/path sampling via the MIS power heuristic; 0 restores pure path
+// tracing exactly as before this feature.
+uniform float u_NeeEnabled;
+// Issue #61: number of explicit light samples drawn per emitter per bounce
+// when NEE is enabled (kept a compile-time constant for unrolled loops).
+#define NEE_LIGHT_SAMPLES 1
+
 // Issue #57: albedo and normal map texture arrays. Each scene triangle can
 // reference one albedo map (id in hit.textures.x) and one normal map
 // (hit.textures.y); -1 means "no texture". MAX_TEXTURES is injected at
@@ -186,6 +195,13 @@ vec3 calculateRefraction(vec3 incident, vec3 faceNormal, float ior, out bool isT
 bool sampleGlassBsdf(vec3 incident, vec3 faceNormal, vec3 albedo,
                      float ior, float opacity,
                      out vec3 outDirection, out vec3 outWeight);
+
+// Issue #61: surface next-event estimation with MIS. Explicitly samples an
+// emissive scene primitive from a shading point, weights the contribution by
+// the MIS power heuristic against the given BSDF-sampling pdf of the same
+// direction (bsdfPdf <= 0 means the BSDF sampler provably cannot produce this
+// direction — delta lobes, eye rays — so the light sample keeps full weight).
+vec3 sampleLightNEE(vec3 point, vec3 normal, vec3 bsdfColor, float bsdfPdf);
 
 // Issue #29: RNG moved into the shader (chunks/prng.glsl). The seed is
 // initialized once per pixel per frame in main() from v_WindowPixels and
@@ -533,6 +549,135 @@ vec3 sampleBounceDirection(vec3 normal) {
     return x * tangent + y * bitangent + z * normal;
 }
 
+// Issue #61: surface next-event estimation with multiple importance sampling.
+//
+// Strategy: draw one scene primitive uniformly at random, sample a point
+// uniformly on its axis-aligned bounds (the same cheap stand-in for area
+// sampling used by the medium NEE below), connect with a shadow ray, and add
+// the contribution only when the connection actually reaches THAT primitive —
+// otherwise the estimator would count radiance from the wrong emitter.
+// The solid-angle pdf of this strategy is computed by lightPdfW above.
+//
+// MIS: the sampled direction may also be produced by the BSDF/path sampler,
+// so the two strategies are combined with the power heuristic
+//   w_light = p_l^2 / (p_l^2 + p_b^2),
+// which keeps the combined estimator unbiased while killing the fireflies a
+// pure BSDF path tracer produces near small or intense emitters.
+//
+// bsdfPdf <= 0 is the "delta" sentinel: the BSDF sampler provably cannot
+// generate this direction (mirror/glass/thinfilm/coat lobes, eye rays), so
+// there is no overlap and the light sample keeps full weight.
+//
+// The virtual u_Light quad is NOT part of this scheme: it is invisible to
+// BSDF-sampled rays (it never enters findClosestIntersect), so the existing
+// calculateDirectIllumination estimator has no overlapping strategy and stays
+// MIS-weight-1 by construction.
+vec3 sampleLightNEE(vec3 point, vec3 normal, vec3 bsdfColor, float bsdfPdf) {
+    int totalPrimitives = PRIMITIVE_COUNT;
+    if(totalPrimitives <= 0 || u_NeeEnabled == 0.0f) {
+        return vec3(0.0f);
+    }
+
+    vec3 accumulated = vec3(0.0f);
+    for(int s = 0; s < NEE_LIGHT_SAMPLES; s++) {
+        // Uniformly pick one primitive, then a uniform point on its bounds.
+        int primIndex = int(min(getRand() * float(totalPrimitives),
+                                float(totalPrimitives) - 0.001f));
+
+        bool isTriangle = primIndex < TRIANGLE_COUNT;
+
+        // Bounds of the chosen primitive (animated ellipsoid #0 included).
+        vec3 bMin, bMax;
+        if(isTriangle) {
+            Triangle tri = triangleAt(primIndex);
+            bMin = min(min(tri.vertex1, tri.vertex2), tri.vertex3);
+            bMax = max(max(tri.vertex1, tri.vertex2), tri.vertex3);
+        } else {
+            int eIdx = primIndex - TRIANGLE_COUNT;
+            vec3 center = ellipsoidCenter(eIdx);
+            vec3 radius = max(u_Ellipsoids[eIdx * ELLIPSOID_VECTORS + 1], vec3(RAY_EPSILON));
+            bMin = center - radius;
+            bMax = center + radius;
+        }
+
+        float u1 = getRand();
+        float u2 = getRand();
+        float u3 = getRand();
+        vec3 lightPoint = mix(bMin, bMax, vec3(u1, u2, u3));
+
+        vec3 toLight = lightPoint - point;
+        float lightDistance = length(toLight);
+        if(lightDistance < RAY_EPSILON) {
+            continue;
+        }
+        vec3 shadowDir = toLight / lightDistance;
+
+        // Shading-side backface rejection before tracing anything.
+        if(dot(normal, shadowDir) <= 0.0f) {
+            continue;
+        }
+
+        // Occlusion-only any-hit via BVH; clip slightly short of the target.
+        if(bvhAnyHit(point + normal * SHADOW_CLIP, shadowDir, lightDistance - SHADOW_CLIP)) {
+            continue;
+        }
+
+        // Confirm the connection actually landed on the sampled primitive:
+        // the bounds are a sampling proxy, not the emitter surface itself.
+        float hitDistance;
+        bool reachedTarget;
+        if(isTriangle) {
+            reachedTarget = triangleHitDistance(primIndex, point + normal * SHADOW_CLIP,
+                                                shadowDir, lightDistance, hitDistance);
+        } else {
+            reachedTarget = ellipsoidHitDistance(primIndex - TRIANGLE_COUNT,
+                                                 point + normal * SHADOW_CLIP,
+                                                 shadowDir, lightDistance, hitDistance);
+        }
+        if(!reachedTarget) {
+            continue;
+        }
+
+        // Emissive payload of the target. Triangles carry no material slot in
+        // their packed layout, so only ellipsoids act as emitters here; that
+        // matches the active transport, where triangle hits always take the
+        // diffuse branch (their material is vec3(0)) and never emit.
+        vec3 emission = vec3(0.0f);
+        if(!isTriangle) {
+            vec3 material = u_Ellipsoids[(primIndex - TRIANGLE_COUNT) * ELLIPSOID_VECTORS + 3];
+            if(isEmitter(material)) {
+                // Match the active transport: the MATERIAL_EMISSIVE hit branch
+                // adds plain hit.color (its later EMISSIVE_STRENGTH variant is
+                // unreachable behind the early isEmitter exit).
+                emission = u_Ellipsoids[(primIndex - TRIANGLE_COUNT) * ELLIPSOID_VECTORS + 2];
+            }
+        }
+        if(emission.r + emission.g + emission.b <= 0.0f) {
+            continue;
+        }
+
+        // Geometry term for the connection (light-side cosine is implicit in
+        // the hit test against the true curved/planar surface).
+        vec3 delta = lightPoint - (point + normal * SHADOW_CLIP);
+        float distanceSquared = dot(delta, delta);
+        float geometryTerm = 1.0f / max(distanceSquared, CLIP_VAL);
+
+        float pdfW = float(totalPrimitives)
+            / max(aabbVolume(bMin, bMax), CLIP_VAL)
+            * geometryTerm;
+
+        // Lambertian BRDF value toward the light sample.
+        vec3 brdfValue = bsdfColor * (1.0f / 3.14159265f);
+
+        // Power-heuristic MIS weight (beta = 2) against the BSDF sampler.
+        float misWeight = pdfW * pdfW
+            / max(pdfW * pdfW + bsdfPdf * bsdfPdf, CLIP_VAL);
+
+        accumulated += emission * brdfValue * geometryTerm * misWeight / pdfW;
+    }
+    return accumulated;
+}
+
 // ---- Issue #64: volumetric path tracing ------------------------------------
 //
 // Radiative transfer in a participating medium adds three interactions to the
@@ -657,6 +802,42 @@ vec3 sampleMediumDirectLight(vec3 point, vec3 wo, float g) {
         * solidAngleConversion / pdfArea;
 }
 
+// Issue #61: solid-angle density of the NEE light-sampling strategy evaluated
+// toward an emissive hit at `hitPoint`, given the shading (ray-origin) point
+// and the primitive identity of the hit. This is the pdf of the exact sampler
+// used in sampleLightNEE (uniform primitive choice, uniform point on the
+// primitive's axis-aligned bounds, converted to the sphere measure), used to
+// MIS-weight BSDF-sampled emitter hits against those explicit samples.
+// Returns a negative pdf (no overlap with the light strategy) when NEE is
+// disabled, which makes the corresponding MIS weight collapse to 1.
+float emitterLightPdfW(int primIndex, bool isTriangle,
+                       vec3 shadingPoint, vec3 hitPoint) {
+    if(u_NeeEnabled == 0.0f || PRIMITIVE_COUNT <= 0) {
+        return -1.0f;
+    }
+    // Bounds of the chosen primitive (animated ellipsoid #0 included) — must
+    // mirror the sampler in sampleLightNEE exactly.
+    vec3 bMin, bMax;
+    if(isTriangle) {
+        Triangle tri = triangleAt(primIndex);
+        bMin = min(min(tri.vertex1, tri.vertex2), tri.vertex3);
+        bMax = max(max(tri.vertex1, tri.vertex2), tri.vertex3);
+    } else {
+        int eIdx = primIndex - TRIANGLE_COUNT;
+        vec3 center = ellipsoidCenter(eIdx);
+        vec3 radius = max(u_Ellipsoids[eIdx * ELLIPSOID_VECTORS + 1], vec3(RAY_EPSILON));
+        bMin = center - radius;
+        bMax = center + radius;
+    }
+    vec3 delta = hitPoint - shadingPoint;
+    float distanceSquared = max(dot(delta, delta), CLIP_VAL);
+    // Uniform primitive choice: pdf_A = 1 / PRIMITIVE_COUNT over the chosen
+    // primitive's bounds, converted to solid angle by 1 / r^2.
+    return float(PRIMITIVE_COUNT)
+        / max(aabbVolume(bMin, bMax), CLIP_VAL)
+        / distanceSquared;
+}
+
 vec3 tracePath(vec3 startPoint, vec3 startDirection) {
     vec3 point = startPoint;
     vec3 direction = startDirection;
@@ -666,6 +847,14 @@ vec3 tracePath(vec3 startPoint, vec3 startDirection) {
     // accounted for by cosine-weighted NEE, so an escaping ray must not add
     // the env radiance again. Specular chains (mirror/glass/camera) keep it.
     bool suppressEnvHit = false;
+    // Issue #61: solid-angle pdf of the BSDF/path sampler that produced the
+    // current ray segment, or a negative sentinel when the segment cannot be
+    // attributed to a BSDF-sampling strategy (camera rays, mirror/glass/
+    // thin-film/coat delta lobes, phase-function scattering). Emitter hits
+    // found along such segments keep full weight (no MIS split); along
+    // diffuse/GGX segments they are combined with the explicit light samples
+    // through the power heuristic so nothing is counted twice.
+    float prevBsdfPdfW = -1.0f;
     // Issue #64: number of medium scatter events so far along this path.
     int volumeScatters = 0;
 
@@ -702,6 +891,12 @@ vec3 tracePath(vec3 startPoint, vec3 startDirection) {
                 // Single-scattering NEE from the medium vertex.
                 accumulated += throughput
                     * sampleMediumDirectLight(scatterPoint, -direction, u_FogAnisotropy);
+                // Issue #61: explicit samples of emissive geometry from the
+                // medium vertex. The phase function is not part of the MIS
+                // balance (bsdfPdf sentinel < 0), matching the unweighted
+                // area-light NEE above.
+                accumulated += throughput * sampleLightNEE(scatterPoint, -direction,
+                    vec3(1.0f), -1.0f);
 
                 // Continue along a phase-function-sampled direction. Tint by
                 // the medium color so colored fog stays colored on multiple
@@ -709,6 +904,9 @@ vec3 tracePath(vec3 startPoint, vec3 startDirection) {
                 direction = samplePhaseDirection(direction, u_FogAnisotropy);
                 point = scatterPoint;
                 throughput *= u_FogColor;
+                // Issue #61: a phase-sampled segment carries no BSDF-sampling
+                // pdf, so an emitter hit along it keeps full weight.
+                prevBsdfPdfW = -1.0f;
                 // The scattered ray can legitimately reach the environment,
                 // and the volumetric NEE above only sampled the area light.
                 suppressEnvHit = false;
@@ -738,8 +936,22 @@ vec3 tracePath(vec3 startPoint, vec3 startDirection) {
         hit.color = sampleAlbedo(hit.color, hit);
         hit.normal = sampleNormal(hit.normal, hit);
 
+        // Issue #61: MIS weighting for emitter hits found by BSDF-sampled
+        // rays. Along diffuse/GGX segments the explicit light samples in
+        // sampleLightNEE already cover this emitter, so the hit contribution
+        // is combined through the power heuristic; along camera rays and
+        // delta-lobe chains (mirror/glass/thinfilm/coat, prevBsdfPdfW < 0)
+        // the BSDF sampler is the only strategy that can see the emitter and
+        // the hit keeps full weight. The virtual u_Light quad is not scene
+        // geometry, so its dedicated NEE estimator never overlaps this path.
         if(isEmitter(hit.material)) {
-            accumulated += throughput * hit.color;
+            float misWeight = prevBsdfPdfW <= 0.0f
+                ? 1.0f
+                : (prevBsdfPdfW * prevBsdfPdfW)
+                    / max(prevBsdfPdfW * prevBsdfPdfW
+                          + emitterLightPdfW(bvhLastPrimIndex, bvhLastIsTriangle,
+                                             point, hit.intersect), CLIP_VAL);
+            accumulated += throughput * hit.color * misWeight;
             break;
         }
 
@@ -919,13 +1131,20 @@ vec3 tracePath(vec3 startPoint, vec3 startDirection) {
             vec3 kd = (vec3(1.0f) - fresnel) * (1.0f - metalness) / 3.14159265f;
             vec3 brdfWeight = specular + kd * hit.color;
 
-            accumulated += throughput * calculateDirectIllumination(
-                hit.intersect, hit.normal,
-                clamp(brdfWeight, vec3(0.0f), vec3(4.0f)));
+            // Issue #61: explicit light samples combined with the BSDF-sampled
+            // bounce through the MIS power heuristic (the BSDF value toward
+            // each sampled direction is folded into sampleLightNEE).
+            accumulated += throughput * sampleLightNEE(hit.intersect, hit.normal,
+                clamp(brdfWeight, vec3(0.0f), vec3(4.0f)),
+                max(dTerm * ndoth, CLIP_VAL) / (4.0f * ndotv));
 
             direction = normalize(lightDir);
             point = hit.intersect + hit.normal * CLIP_VAL;
             throughput *= clamp(brdfWeight, vec3(0.0f), vec3(4.0f));
+
+            // Issue #61: the next segment is attributed to the GGX sampler;
+            // its solid-angle pdf is D*ndoth/(4|o·h|).
+            prevBsdfPdfW = max(dTerm * ndoth, CLIP_VAL) / (4.0f * ndotv);
 
             if(depth > 1 && getRand() < P_BOUNCE) {
                 break;
@@ -949,8 +1168,12 @@ vec3 tracePath(vec3 startPoint, vec3 startDirection) {
                 throughput *= vec3(fresnel);
             } else {
                 // Base: Lambert bounce with direct lighting.
+                // Issue #61: NEE+MIS toward emissive geometry; the virtual
+                // u_Light quad keeps its own MIS-weight-1 estimator.
                 accumulated += throughput * calculateDirectIllumination(hit.intersect, hit.normal, hit.color);
                 vec3 bounceDirection = sampleBounceDirection(hit.normal);
+                accumulated += throughput * sampleLightNEE(hit.intersect, hit.normal,
+                    hit.color, max(dot(hit.normal, bounceDirection), 0.0f) / 3.14159265f);
                 float weight = max(dot(hit.normal, bounceDirection), 0.0f) / max(P_BOUNCE, CLIP_VAL);
                 throughput *= hit.color * weight;
                 direction = bounceDirection;
@@ -968,6 +1191,14 @@ vec3 tracePath(vec3 startPoint, vec3 startDirection) {
 
         accumulated += throughput * calculateDirectIllumination(hit.intersect, hit.normal, hit.color);
 
+        // Issue #61: NEE+MIS toward emissive geometry. The explicit samples
+        // and the cosine-sampled bounce below are combined with the power
+        // heuristic (the sampler's pdf is passed in for the weight).
+        vec3 bounceDirection = sampleBounceDirection(hit.normal);
+        float bouncePdfW = max(dot(hit.normal, bounceDirection), 0.0f) / 3.14159265f;
+        accumulated += throughput * sampleLightNEE(hit.intersect, hit.normal,
+            hit.color, bouncePdfW);
+
         // Issue #56: environment (IBL) contribution via importance sampling.
         accumulated += throughput * sampleEnvironmentIllumination(hit.intersect, hit.normal, hit.color);
         suppressEnvHit = true;
@@ -976,7 +1207,6 @@ vec3 tracePath(vec3 startPoint, vec3 startDirection) {
             break;
         }
 
-        vec3 bounceDirection = sampleBounceDirection(hit.normal);
         float weight = max(dot(hit.normal, bounceDirection), 0.0f) / P_BOUNCE;
         throughput *= hit.color * weight;
 

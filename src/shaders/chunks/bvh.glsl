@@ -33,6 +33,14 @@ float aabbEntryDistance(vec3 origin, vec3 invDirection, int nodeIndex) {
     return max(max(tSmaller.x, tSmaller.y), tSmaller.z);
 }
 
+// Issue #61: primitive identity of the last bvhClosestPrimitive result,
+// published as module state so tracePath can attribute an Intersect to its
+// source primitive (needed for the NEE/MIS pdf of emissive hits) without
+// changing findClosestIntersect's signature. Valid only until the next
+// closest-hit query on the same invocation.
+int bvhLastPrimIndex = -1;
+bool bvhLastIsTriangle = false;
+
 // Closest-hit traversal. Returns the primitive index of the nearest hit and
 // its distance via out params; the caller re-intersects that single primitive
 // to build the full Intersect payload (cheaper than carrying it through the
@@ -79,6 +87,9 @@ BvhHit bvhClosestPrimitive(vec3 point, vec3 direction) {
                     result.isExisting = true;
                     result.primIndex = primIndex;
                     result.isTriangle = primIndex < TRIANGLE_COUNT;
+                    // Issue #61: publish the winning primitive identity.
+                    bvhLastPrimIndex = primIndex;
+                    bvhLastIsTriangle = result.isTriangle;
                 }
             }
         } else {

@@ -68,6 +68,20 @@ export const volumetrics = {
   emission: VOLUME_EMISSION,
 };
 
+// Issue #61: surface next-event estimation (NEE) + MIS scene option.
+//
+// `enabled` turns on explicit sampling of the emissive scene primitives at
+// each non-specular bounce, combined with the existing BSDF/path sampling via
+// the MIS power heuristic (see sampleLightNEE in pathtrace.frag). Setting it
+// to false keeps the integrator exactly the previous pure path tracer: every
+// NEE call site is gated behind the u_NeeEnabled uniform in the shader.
+// `lightSamples` is the number of area samples drawn per emitter per bounce.
+export const NEE_LIGHT_SAMPLES = 1;
+export const nextEventEstimation = {
+  enabled: true,
+  lightSamples: NEE_LIGHT_SAMPLES,
+};
+
 interface SceneTriangle {
   vertex1: Float32Array;
   vertex2: Float32Array;

@@ -12,6 +12,8 @@ import {
   FOCAL_DISTANCE,
   // Issue #64: participating media (volumetrics) scene option.
   volumetrics,
+  // Issue #61: next-event estimation toggle.
+  nextEventEstimation,
 } from "./constants";
 import {
   computeCameraBasis,
@@ -83,6 +85,9 @@ export class Renderer {
   // Issue #59: dynamic render resolution scale (replaces the old RENDER_SCALE
   // constant; the UI slider calls setRenderScale to mutate it).
   private renderScale = defaultRenderScale();
+  // Issue #61: surface next-event estimation toggle. Defaults to the scene
+  // option; the UI checkbox flips it via setNextEventEstimation.
+  private neeEnabled = nextEventEstimation.enabled;
 
   // Issue #52: interactive camera state + active drag info.
   private cameraState!: CameraState;
@@ -148,6 +153,8 @@ export class Renderer {
       u_FogColor: gl.getUniformLocation(programs.pathtrace, "u_FogColor")!,
       u_FogEmission: gl.getUniformLocation(programs.pathtrace, "u_FogEmission")!,
       u_FogAnisotropy: gl.getUniformLocation(programs.pathtrace, "u_FogAnisotropy")!,
+      // Issue #61: surface next-event estimation toggle.
+      u_NeeEnabled: gl.getUniformLocation(programs.pathtrace, "u_NeeEnabled")!,
     };
     const localUniforms = {
       u_Eye: gl.getUniformLocation(programs.local, "u_Eye")!,
@@ -238,6 +245,9 @@ export class Renderer {
     gl.uniform3fv(p.u_FogColor, volumetrics.color);
     gl.uniform3fv(p.u_FogEmission, volumetrics.emission);
     gl.uniform1f(p.u_FogAnisotropy, volumetrics.anisotropy);
+    // Issue #61: static NEE toggle. u_NeeEnabled == 0 keeps every NEE/MIS
+    // call site inert, so the transport is the previous pure path tracer.
+    gl.uniform1f(p.u_NeeEnabled, nextEventEstimation.enabled ? 1.0 : 0.0);
 
     gl.useProgram(programs.display);
     gl.uniform1i(this.uniforms.displayUniforms.u_AccumTexture, 0);
@@ -284,6 +294,8 @@ export class Renderer {
       u_FogColor: WebGLUniformLocation;
       u_FogEmission: WebGLUniformLocation;
       u_FogAnisotropy: WebGLUniformLocation;
+      // Issue #61: surface next-event estimation toggle.
+      u_NeeEnabled: WebGLUniformLocation;
     };
     localUniforms: {
       u_Eye: WebGLUniformLocation;
@@ -360,6 +372,9 @@ export class Renderer {
     // at init; only dynamic values are uploaded per frame here.
     gl.uniform2f(this.uniforms.pathtraceUniforms.u_Resolution, t.textureWidth, t.textureHeight);
     gl.uniform1f(this.uniforms.pathtraceUniforms.u_FrameCount, this.frameCount);
+    // Issue #61: per-frame NEE toggle so the runtime checkbox applies on the
+    // very next accumulated frame without re-initializing the renderer.
+    gl.uniform1f(this.uniforms.pathtraceUniforms.u_NeeEnabled, this.neeEnabled ? 1.0 : 0.0);
     // Issue #65: seconds since the render loop started. Drives the animated
     // ellipsoid in the shader; the accumulation average across frames becomes
     // motion blur.
@@ -509,6 +524,19 @@ export class Renderer {
     this.renderScale = clamped;
     this.frameCount = 0;
     this.resizeCanvas();
+  }
+
+  /**
+   * Issue #61: toggle surface next-event estimation (explicit emissive-
+   * primitive sampling combined with BSDF sampling via the MIS power
+   * heuristic) at runtime. The uniform upload is per-frame so no re-init is
+   * needed; accumulation resets so samples from different integrators are
+   * never averaged together.
+   */
+  setNextEventEstimation(enabled: boolean): void {
+    this.neeEnabled = enabled;
+    this.frameCount = 0;
+    this.startRenderLoop();
   }
 
   resizeCanvas(): void {
