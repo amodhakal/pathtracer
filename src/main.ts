@@ -58,8 +58,6 @@ async function bootstrap(): Promise<void> {
   // Issue #59: wire up the progressive display controls (HUD, pause/resume,
   // save-PNG, render-scale slider) declared in index.html.
   wireProgressiveDisplayControls(renderer);
-} catch (err) {
-  reportError("Error: " + err);
 }
 
 /**
@@ -87,6 +85,13 @@ function wireProgressiveDisplayControls(renderer: Renderer): void {
     const v = parseFloat(scale.value);
     renderer.setRenderScale(v);
     if (scaleValue) scaleValue.textContent = v.toFixed(2);
+  });
+
+  // Issue #61: next-event estimation toggle. Flipping it resets accumulation
+  // so the two integrators are never averaged into one image.
+  const neeToggle = document.getElementById("toggle-nee") as HTMLInputElement | null;
+  neeToggle?.addEventListener("change", () => {
+    renderer.setNextEventEstimation(neeToggle.checked);
   });
 }
 

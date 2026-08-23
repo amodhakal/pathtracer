@@ -151,4 +151,40 @@ describe("shader sources", () => {
     // Vacuum short-circuits distance sampling and transmittance.
     expect(pathtrace).toMatch(/sigmaT\s*<=\s*0\.0f/);
   });
+
+  // Issue #61: surface next-event estimation + multiple importance sampling.
+  it("implements surface NEE with MIS against emissive geometry (#61)", () => {
+    const pathtrace = readFileSync(join(shaderDir, "pathtrace.frag"), "utf8");
+    // Runtime toggle uniform.
+    expect(pathtrace).toContain("uniform float u_NeeEnabled");
+    // Explicit light-sampling estimator with an MIS power heuristic.
+    expect(pathtrace).toContain("vec3 sampleLightNEE(");
+    expect(pathtrace).toContain("misWeight = pdfW * pdfW");
+    // The light strategy pdf must mirror its sampler: uniform primitive
+    // choice over bounds volume, converted to solid angle by the geometry term.
+    expect(pathtrace).toMatch(/float\(totalPrimitives\)\s*\n?\s*\/ max\(aabbVolume/);
+    // BSDF-sampled bounce directions feed the MIS weight via their pdf.
+    expect(pathtrace).toContain("float bouncePdfW = max(dot(hit.normal, bounceDirection), 0.0f) / 3.14159265f;");
+    expect(pathtrace.match(/sampleLightNEE\(/g)?.length).toBeGreaterThanOrEqual(3);
+    // Emitter hits along BSDF segments are MIS-weighted against the light
+    // samples; delta/camera segments keep full weight.
+    expect(pathtrace).toContain("emitterLightPdfW(bvhLastPrimIndex, bvhLastIsTriangle,");
+  });
+
+  it("keeps pure path tracing when the NEE toggle is off (#61)", () => {
+    const pathtrace = readFileSync(join(shaderDir, "pathtrace.frag"), "utf8");
+    // Every explicit-sample call site is gated on the toggle.
+    expect(pathtrace).toMatch(/u_NeeEnabled == 0\.0f/);
+    const neeIdx = pathtrace.indexOf("u_NeeEnabled == 0.0f");
+    const sampleFnIdx = pathtrace.indexOf("vec3 sampleLightNEE(vec3 point");
+    const emitterPdfIdx = pathtrace.indexOf("float emitterLightPdfW(int primIndex");
+    // Both consumers appear after the guard in their respective functions.
+    expect(neeIdx).toBeGreaterThan(-1);
+    expect(sampleFnIdx).toBeGreaterThan(-1);
+    expect(emitterPdfIdx).toBeGreaterThan(-1);
+    // The diffuse tail keeps the legacy direct-light estimator untouched.
+    expect(pathtrace).toContain(
+      "accumulated += throughput * calculateDirectIllumination(hit.intersect, hit.normal, hit.color);",
+    );
+  });
 });

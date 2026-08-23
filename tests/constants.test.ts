@@ -151,4 +151,15 @@ describe("constants / scene data", () => {
     }
     expect(volumeCount).toBeGreaterThan(0);
   });
+
+  // Issue #61: next-event estimation toggle scene option.
+  it("exposes the next-event estimation scene option (#61)", async () => {
+    const { nextEventEstimation, NEE_LIGHT_SAMPLES } = await import("../src/constants");
+    // The feature ships enabled; flipping it off must restore pure PT.
+    expect(nextEventEstimation.enabled).toBe(true);
+    expect(typeof nextEventEstimation.enabled).toBe("boolean");
+    expect(Number.isInteger(NEE_LIGHT_SAMPLES));
+    expect(NEE_LIGHT_SAMPLES).toBeGreaterThan(0);
+    expect(nextEventEstimation.lightSamples).toBe(NEE_LIGHT_SAMPLES);
+  });
 });
