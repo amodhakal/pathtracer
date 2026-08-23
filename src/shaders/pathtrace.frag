@@ -368,26 +368,18 @@ vec3 evaluateEnvironment(vec3 direction) {
 
 bool traceShadowRay(vec3 origin, vec3 direction) {
     for(int i = 0; i < ELLIPSOID_COUNT; i++) {
-        Ellipsoid ellipsoid;
-        ellipsoid.center = ellipsoidCenter(i); // Issue #65: animated center
-        ellipsoid.radius = u_Ellipsoids[i * ELLIPSOID_VECTORS + 1];
-        ellipsoid.color = u_Ellipsoids[i * ELLIPSOID_VECTORS + 2];
-        ellipsoid.material = u_Ellipsoids[i * ELLIPSOID_VECTORS + 3];
-        Intersect shadowHit = calculateRayEllipsoidIntersect(origin, direction, ellipsoid);
-        if(shadowHit.isExisting && shadowHit.distance > CLIP_VAL) {
+        // Issue #48: indexed occluder with explicit (animated) center — no
+        // Ellipsoid/Intersect struct allocated per ellipsoid. The animated
+        // center keeps issue #65 motion blur correct under the refactor.
+        if(rayEllipsoidOccluded(ellipsoidCenter(i), i, origin, direction, 1e30f)) {
             return true;
         }
     }
 
     for(int i = 0; i < TRIANGLE_COUNT; i++) {
-        Triangle triangle;
-        triangle.vertex1 = u_Triangles[i * TRIANGLE_VECTORS];
-        triangle.vertex2 = u_Triangles[i * TRIANGLE_VECTORS + 1];
-        triangle.vertex3 = u_Triangles[i * TRIANGLE_VECTORS + 2];
-        triangle.normal = u_Triangles[i * TRIANGLE_VECTORS + 3];
-        triangle.color = u_Triangles[i * TRIANGLE_VECTORS + 4];
-        Intersect shadowHit = calculateRayTriangleIntersect(origin, direction, triangle);
-        if(shadowHit.isExisting && shadowHit.distance > CLIP_VAL) {
+        // Issue #48: indexed occluder reads u_Triangles directly — no
+        // Triangle/Intersect struct allocated per triangle.
+        if(rayTriangleOccluded(i, origin, direction, 1e30f)) {
             return true;
         }
     }
@@ -463,21 +455,11 @@ vec3 calculateDirectIllumination(vec3 point, vec3 normal, vec3 color) {
         // uploading u_Ellipsoids each frame, so the BVH traversal above sees
         // the animated positions without any shader-side changes.
 
+        // Issue #48: indexed occlusion test reads u_Triangles directly by
+        // primitive index, so no Triangle struct is allocated per triangle in
+        // this (per-light-sample, per-bounce) loop.
         for(int i = 0; i < TRIANGLE_COUNT && !occluded; i++) {
-            Triangle triangle;
-            triangle.vertex1 = u_Triangles[i * TRIANGLE_VECTORS];
-            triangle.vertex2 = u_Triangles[i * TRIANGLE_VECTORS + 1];
-            triangle.vertex3 = u_Triangles[i * TRIANGLE_VECTORS + 2];
-            triangle.normal = u_Triangles[i * TRIANGLE_VECTORS + 3];
-            triangle.color = u_Triangles[i * TRIANGLE_VECTORS + 4];
-            // Issue #57: UV/texture slots are irrelevant for occlusion tests
-            // but must be populated to satisfy the struct layout.
-            triangle.uv1 = u_Triangles[i * TRIANGLE_VECTORS + 5].xy;
-            triangle.uv2 = u_Triangles[i * TRIANGLE_VECTORS + 5].zw;
-            triangle.uv3 = u_Triangles[i * TRIANGLE_VECTORS + 6].xy;
-            triangle.textures = u_Triangles[i * TRIANGLE_VECTORS + 6].zw;
-
-            occluded = rayTriangleOccluded(shadowRayOrigin, lightDirection, lightDistance - SHADOW_CLIP, triangle);
+            occluded = rayTriangleOccluded(i, shadowRayOrigin, lightDirection, lightDistance - SHADOW_CLIP);
         }
 
         if(occluded) {
