@@ -26,7 +26,38 @@ try {
     programs.local,
     programs.display,
   ]);
-  new Renderer(canvas, gl, programs, geometry);
+  const renderer = new Renderer(canvas, gl, programs, geometry);
+  // Issue #59: wire up the progressive display controls (HUD, pause/resume,
+  // save-PNG, render-scale slider) declared in index.html.
+  wireProgressiveDisplayControls(renderer);
 } catch (err) {
   reportError("Error: " + err);
+}
+
+/**
+ * Issue #59: connect the runtime UI controls to the Renderer.
+ *
+ * - Pause/Resume button toggles progressive rendering.
+ * - Save PNG button downloads the current framebuffer as a PNG.
+ * - Render-scale slider adjusts the render resolution multiplier live.
+ *
+ * The sample-count HUD is updated by the Renderer itself each accumulated
+ * frame, so there is nothing to poll here.
+ */
+function wireProgressiveDisplayControls(renderer: Renderer): void {
+  const pauseBtn = document.getElementById("toggle-pause") as HTMLButtonElement | null;
+  pauseBtn?.addEventListener("click", () => {
+    renderer.setPaused(pauseBtn.textContent?.toLowerCase() !== "resume");
+  });
+
+  const saveBtn = document.getElementById("save-png") as HTMLButtonElement | null;
+  saveBtn?.addEventListener("click", () => renderer.savePNG());
+
+  const scale = document.getElementById("render-scale") as HTMLInputElement | null;
+  const scaleValue = document.getElementById("render-scale-value");
+  scale?.addEventListener("input", () => {
+    const v = parseFloat(scale.value);
+    renderer.setRenderScale(v);
+    if (scaleValue) scaleValue.textContent = v.toFixed(2);
+  });
 }

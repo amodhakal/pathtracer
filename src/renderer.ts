@@ -33,18 +33,19 @@ const FRAME_COUNT = 12_000;
 /**
  * Internal render resolution scale relative to the canvas's CSS size.
  *
- * The framebuffer is sized as clientWidth/Height * RENDER_SCALE while the
+ * The framebuffer is sized as clientWidth/Height * renderScale while the
  * canvas element stays at its full CSS size (the browser upsamples the
  * drawing buffer). On HiDPI ("retina") displays devicePixelRatio can be 2+
  * which would multiply the fragment cost by 4x or more for little visible
  * benefit in a path tracer — clamping to min(devicePixelRatio, 1) renders
  * at most 1 device pixel per pixel.
  *
- * Single source of truth for render scaling: a future UI control
- * (e.g. issue #59's render-scale slider) should replace/update this
- * constant rather than introducing a parallel factor.
+ * Single source of truth for render scaling: issue #59 exposes this value to
+ * a UI slider (setRenderScale) rather than introducing a parallel factor.
  */
-const RENDER_SCALE = Math.min(window.devicePixelRatio || 1, 1);
+function defaultRenderScale(): number {
+  return Math.min(window.devicePixelRatio || 1, 1);
+}
 
 function getLightUniforms(gl: WebGL2RenderingContext, program: WebGLProgram) {
   return {
@@ -73,6 +74,11 @@ export class Renderer {
   private startTimeMs: number | null = null;
   private renderLoopActive = false;
   private resizeObserver: ResizeObserver;
+  // Issue #59: render paused (samples-frozen) state.
+  private paused = false;
+  // Issue #59: dynamic render resolution scale (replaces the old RENDER_SCALE
+  // constant; the UI slider calls setRenderScale to mutate it).
+  private renderScale = defaultRenderScale();
 
   // Issue #52: interactive camera state + active drag info.
   private cameraState!: CameraState;
@@ -365,29 +371,39 @@ export class Renderer {
   }
 
   private render = (): void => {
-    if (pathTracingEnabled) {
-      this.renderPathtrace();
-      this.renderDisplay();
-
-      if (this.readTex === this.targets?.accumTextureA) {
-        this.readTex = this.targets.accumTextureB;
-        this.writeFbo = this.targets.fboA;
-        this.writeTex = this.targets.accumTextureA;
-      } else {
-        this.readTex = this.targets!.accumTextureA;
-        this.writeFbo = this.targets!.fboB;
-        this.writeTex = this.targets!.accumTextureB;
-      }
-
-      this.frameCount++;
-      if (this.frameCount < FRAME_COUNT) {
-        requestAnimationFrame(this.render);
-      } else {
-        this.renderLoopActive = false;
-        console.log(`Rendering complete after ${FRAME_COUNT} frames`);
-      }
-    } else {
+    if (!pathTracingEnabled) {
       this.renderLocal();
+      return;
+    }
+
+    // Issue #59: when paused, show the final accumulated frame without
+    // advancing the sample count or scheduling another frame.
+    if (this.paused) {
+      this.renderDisplay();
+      return;
+    }
+
+    this.renderPathtrace();
+    this.renderDisplay();
+
+    if (this.readTex === this.targets?.accumTextureA) {
+      this.readTex = this.targets.accumTextureB;
+      this.writeFbo = this.targets.fboA;
+      this.writeTex = this.targets.accumTextureA;
+    } else {
+      this.readTex = this.targets!.accumTextureA;
+      this.writeFbo = this.targets!.fboB;
+      this.writeTex = this.targets!.accumTextureB;
+    }
+
+    this.frameCount++;
+    // Issue #59: update the sample-count HUD.
+    this.updateFrameCounter();
+    if (this.frameCount < FRAME_COUNT) {
+      requestAnimationFrame(this.render);
+    } else {
+      this.renderLoopActive = false;
+      console.log(`Rendering complete after ${FRAME_COUNT} frames`);
     }
   };
 
@@ -397,9 +413,75 @@ export class Renderer {
     requestAnimationFrame(this.render);
   }
 
+  /** Issue #59: current accumulation sample count, for the HUD. */
+  getSampleCount(): number {
+    return this.frameCount;
+  }
+
+  /** Issue #59: sample-count HUD. */
+  private updateFrameCounter(): void {
+    const el = document.getElementById("frame-counter");
+    if (el) el.textContent = `Samples: ${this.frameCount}`;
+  }
+
+  /**
+   * Issue #59: pause / resume progressive rendering. Pausing freezes the
+   * accumulated image (no further samples are taken); resuming continues
+   * accumulating from where it stopped.
+   */
+  setPaused(paused: boolean): void {
+    if (!pathTracingEnabled) return;
+    if (this.paused === paused) return;
+    this.paused = paused;
+    if (!paused) {
+      // Resuming: keep the current accumulation and continue the loop.
+      this.startRenderLoop();
+    } else {
+      this.renderLoopActive = false;
+    }
+    const btn = document.getElementById("toggle-pause") as HTMLButtonElement | null;
+    if (btn) btn.textContent = paused ? "Resume" : "Pause";
+  }
+
+  /** Issue #59: download the current canvas contents as a PNG. */
+  savePNG(): void {
+    // preserveDrawingBuffer is enabled in gl-context.ts so the buffer is
+    // still readable here. Render one final display pass to guarantee the
+    // latest accumulation is present, then export.
+    if (pathTracingEnabled) this.renderDisplay();
+    else this.renderLocal();
+    this.canvas.toBlob((blob) => {
+      if (!blob) {
+        console.error("savePNG: failed to encode canvas");
+        return;
+      }
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `pathtrace-${Date.now()}.png`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    }, "image/png");
+  }
+
+  /**
+   * Issue #59: set the render-resolution scale (resolution multiplier). The
+   * framebuffer is rebuilt at the new size and accumulation resets, so a
+   * lower scale trades quality for speed and a higher scale sharpens output.
+   */
+  setRenderScale(scale: number): void {
+    const clamped = Math.max(0.1, Math.min(scale, 2));
+    if (clamped === this.renderScale) return;
+    this.renderScale = clamped;
+    this.frameCount = 0;
+    this.resizeCanvas();
+  }
+
   resizeCanvas(): void {
-    const width = Math.max(1, Math.round(this.canvas.clientWidth * RENDER_SCALE));
-    const height = Math.max(1, Math.round(this.canvas.clientHeight * RENDER_SCALE));
+    const width = Math.max(1, Math.round(this.canvas.clientWidth * this.renderScale));
+    const height = Math.max(1, Math.round(this.canvas.clientHeight * this.renderScale));
 
     if (this.canvas.width === width && this.canvas.height === height) return;
 
