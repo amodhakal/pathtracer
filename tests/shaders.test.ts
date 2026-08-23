@@ -117,4 +117,38 @@ describe("shader sources", () => {
     expect(pathtrace).toContain("sampleDispersiveIor(baseIor)");
     expect(pathtrace).toMatch(/sampleGlassBsdf\([^)]*ior,/s);
   });
+
+  // Issue #64: volumetrics / participating media.
+  it("declares the volume material type in the shared chunks (#64)", () => {
+    const common = readFileSync(join(shaderDir, "chunks/common.glsl"), "utf8");
+    expect(common).toContain("#define MATERIAL_VOLUME 7");
+  });
+
+  it("integrates volumetric path tracing into the path tracer (#64)", () => {
+    const pathtrace = readFileSync(join(shaderDir, "pathtrace.frag"), "utf8");
+    // Participating-media uniforms (scene option surface).
+    expect(pathtrace).toContain("uniform float u_FogDensity");
+    expect(pathtrace).toContain("uniform float u_FogScatterAlbedo");
+    expect(pathtrace).toContain("uniform vec3 u_FogEmission");
+    expect(pathtrace).toContain("uniform float u_FogAnisotropy");
+    // Tracking machinery: free-flight distance sampling, Beer-Lambert
+    // transmittance for shadow rays, and phase-function sampling.
+    expect(pathtrace).toContain("float sampleMediumDistance(float sigmaT)");
+    expect(pathtrace).toContain("vec3 mediumTransmittance(");
+    expect(pathtrace).toContain("vec3 samplePhaseDirection(");
+    expect(pathtrace).toContain("vec3 sampleMediumDirectLight(");
+    // The medium event must race the surface hit inside tracePath.
+    expect(pathtrace).toMatch(/mediumDistance\s*<\s*surfaceDistance/);
+    // And a bounded MATERIAL_VOLUME primitive must be handled too.
+    expect(pathtrace).toContain("materialType == MATERIAL_VOLUME");
+  });
+
+  it("keeps non-volume scenes on the surface-only path (#64)", () => {
+    const pathtrace = readFileSync(join(shaderDir, "pathtrace.frag"), "utf8");
+    // The whole medium branch is gated on a positive density, so density 0
+    // reduces the integrator to the previous surface-only transport.
+    expect(pathtrace).toMatch(/u_FogDensity\s*>\s*0\.0f/);
+    // Vacuum short-circuits distance sampling and transmittance.
+    expect(pathtrace).toMatch(/sigmaT\s*<=\s*0\.0f/);
+  });
 });

@@ -10,6 +10,8 @@ import {
   MATERIAL_GLASS,
   MATERIAL_MIRROR,
   MATERIAL_THINFILM,
+  // Issue #64: participating media.
+  MATERIAL_VOLUME,
   SCENE_ELLIPSOID_COUNT,
   SCENE_ELLIPSOID_VECTORS,
   SCENE_TRIANGLE_COUNT,
@@ -68,6 +70,7 @@ describe("constants / scene data", () => {
       MATERIAL_EMISSIVE,
       MATERIAL_CLEARCOAT,
       MATERIAL_THINFILM,
+      MATERIAL_VOLUME,
     ];
     for (let i = 0; i < NUM_ELLIPSOIDS; i++) {
       const type = flattenedEllipsoids[i * ELLIPSOID_VEC_VALUE_COUNT + 9];
@@ -118,5 +121,34 @@ describe("constants / scene data", () => {
       }
       expect(Number.isFinite(flattenedEllipsoids[offset + 11])).toBe(true);
     }
+  });
+
+  // Issue #64: volumetrics / participating media scene option.
+  it("exposes a volumetrics scene option that defaults to disabled", async () => {
+    const { volumetrics, MATERIAL_VOLUME } = await import("../src/constants");
+    // Density 0 => the shader skips the medium branch entirely, keeping
+    // non-volume scenes bit-identical to the surface-only integrator.
+    expect(volumetrics.density).toBe(0);
+    expect(volumetrics.scatterAlbedo).toBeGreaterThanOrEqual(0);
+    expect(volumetrics.scatterAlbedo).toBeLessThanOrEqual(1);
+    expect(Math.abs(volumetrics.anisotropy)).toBeLessThan(1);
+    expect(volumetrics.color).toHaveLength(3);
+    expect(volumetrics.emission).toHaveLength(3);
+    expect(MATERIAL_VOLUME).toBe(7);
+  });
+
+  it("encodes the bounded volume ellipsoid with a positive density (#64)", async () => {
+    const { MATERIAL_VOLUME } = await import("../src/constants");
+    let volumeCount = 0;
+    for (let i = 0; i < NUM_ELLIPSOIDS; i++) {
+      const offset = i * ELLIPSOID_VEC_VALUE_COUNT;
+      if (flattenedEllipsoids[offset + 9] !== MATERIAL_VOLUME) continue;
+      volumeCount++;
+      // y = sigma_t must be positive, z = scattering albedo in [0, 1].
+      expect(flattenedEllipsoids[offset + 10]).toBeGreaterThan(0);
+      expect(flattenedEllipsoids[offset + 11]).toBeGreaterThanOrEqual(0);
+      expect(flattenedEllipsoids[offset + 11]).toBeLessThanOrEqual(1);
+    }
+    expect(volumeCount).toBeGreaterThan(0);
   });
 });

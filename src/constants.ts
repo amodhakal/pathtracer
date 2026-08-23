@@ -13,6 +13,10 @@ export const MATERIAL_EMISSIVE = 4;
 export const MATERIAL_CLEARCOAT = 5;
 // Thin-film interference over a mirror base: vec3(type, film thickness [nm], IOR)
 export const MATERIAL_THINFILM = 6;
+// Issue #64: participating media. A MATERIAL_VOLUME primitive bounds a region
+// of homogeneous medium rather than describing a surface:
+//   vec3(type, density (sigma_t), scattering albedo (sigma_s / sigma_t))
+export const MATERIAL_VOLUME = 7;
 
 export const DEFAULT_IOR = 1.0;
 export const DEFAULT_OPACITY = 0.0;
@@ -32,6 +36,37 @@ export const NO_TEXTURE = -1;
 // amount proportional to APERTURE_RADIUS (0 = pinhole, i.e. no DOF).
 export const APERTURE_RADIUS = 0.02;
 export const FOCAL_DISTANCE = 1.2;
+
+// Issue #64: participating media (volumetrics) scene option.
+//
+// `density` is the extinction coefficient sigma_t of a homogeneous medium
+// filling the whole scene. Setting it to 0 (the default) disables volumetrics
+// completely — the shader then samples an infinite free-flight distance, always
+// takes the surface branch, and the integrator is identical to the previous
+// surface-only path tracer. That is how non-volume scenes stay correct.
+//
+// `scatterAlbedo` is sigma_s / sigma_t: 0 = purely absorbing (smoky
+// silhouette), 1 = purely scattering (conservative fog).
+// `anisotropy` is the Henyey-Greenstein g parameter: 0 isotropic, > 0 forward
+// scattering (haze/godrays), < 0 back scattering.
+// `emission` is radiance emitted per collision — non-zero makes a glowing medium.
+export const VOLUME_DENSITY = 0.0;
+export const VOLUME_SCATTER_ALBEDO = 0.9;
+export const VOLUME_ANISOTROPY = 0.0;
+export const VOLUME_COLOR = new Float32Array([1.0, 1.0, 1.0]);
+export const VOLUME_EMISSION = new Float32Array([0.0, 0.0, 0.0]);
+
+// Density used by the bounded demo volume ellipsoid below (independent of the
+// global fog switch, so the volume material is exercised even at density 0).
+export const VOLUME_OBJECT_DENSITY = 6.0;
+
+export const volumetrics = {
+  density: VOLUME_DENSITY,
+  scatterAlbedo: VOLUME_SCATTER_ALBEDO,
+  anisotropy: VOLUME_ANISOTROPY,
+  color: VOLUME_COLOR,
+  emission: VOLUME_EMISSION,
+};
 
 interface SceneTriangle {
   vertex1: Float32Array;
@@ -222,6 +257,19 @@ const ellipsoids = [
       MATERIAL_THINFILM,
       THINFILM_THICKNESS_NM,
       GLASS_IOR,
+    ]),
+  },
+  // Issue #64: bounded participating medium — a homogeneous fog sphere. It is
+  // not a surface: rays enter it and are scattered/absorbed by delta tracking
+  // inside the boundary (see the MATERIAL_VOLUME branch in pathtrace.frag).
+  {
+    position: new Float32Array([0.5, 0.65, 0.15]),
+    radius: new Float32Array([0.18, 0.18, 0.18]),
+    color: new Float32Array([0.85, 0.9, 1.0]),
+    material: new Float32Array([
+      MATERIAL_VOLUME,
+      VOLUME_OBJECT_DENSITY,
+      VOLUME_SCATTER_ALBEDO,
     ]),
   },
 ];
