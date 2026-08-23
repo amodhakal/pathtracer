@@ -19,7 +19,9 @@ export function initGLContext(): GLContext {
     depth: false,
     stencil: false,
     alpha: false,
-    preserveDrawingBuffer: false,
+    // Issue #59: keep the drawing buffer after compositing so the current
+    // frame can be exported to a PNG via canvas.toBlob().
+    preserveDrawingBuffer: true,
   });
   if (!gl) {
     reportError("WebGL2 not supported");
