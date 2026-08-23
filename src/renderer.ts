@@ -3,7 +3,7 @@
 // Issue #39: adopt VAOs — draw calls bind a preconfigured vertex array object
 // instead of re-calling enableVertexAttribArray/vertexAttribPointer per frame.
 import {
-  flattenedTriangles,
+  flattenedTriangles as defaultTriangles,
   flattenedEllipsoids,
   light,
   eye,
@@ -21,6 +21,8 @@ import {
   zoom,
   type CameraState,
 } from "./camera";
+import type { TriangleSoup } from "./gltf-loader";
+import { flattenSoup } from "./gltf-loader";
 import type { Programs } from "./programs";
 import type { QuadGeometry } from "./geometry";
 import { createRenderTargets, destroyRenderTargets, type RenderTargets } from "./framebuffers";
@@ -103,11 +105,19 @@ export class Renderer {
     gl: WebGL2RenderingContext,
     programs: Programs,
     geometry: QuadGeometry,
+    meshTriangles: TriangleSoup | null = null,
   ) {
     this.canvas = canvas;
     this.gl = gl;
     this.programs = programs;
     this.geometry = geometry;
+
+    // Issue #53: when a GLB mesh loaded successfully its flattened triangle
+    // soup replaces the hardcoded Cornell-box walls; otherwise fall back so
+    // the app still renders.
+    const triangles = meshTriangles
+      ? flattenSoup(meshTriangles)
+      : defaultTriangles;
 
     // Issue #39: uniform locations are resolved here, next to the programs.
     const pathtraceUniforms = {
@@ -215,7 +225,7 @@ export class Renderer {
     // WebGL2 note: uniform3fv over a vec3 arr[N] uploads a contiguous
     // 12-float stride — no vec4 padding needed.
     gl.uniform3fv(p.u_Ellipsoids, flattenedEllipsoids);
-    gl.uniform3fv(p.u_Triangles, flattenedTriangles);
+    gl.uniform3fv(p.u_Triangles, triangles);
     gl.uniform1i(p.u_AccumTexture, 1);
     // Issue #58: static thin-lens DOF parameters.
     gl.uniform1f(p.u_ApertureRadius, APERTURE_RADIUS);
@@ -239,7 +249,7 @@ export class Renderer {
     gl.uniform3fv(l.u_Light.normal, light.normal);
     gl.uniform2fv(l.u_Light.size, light.size);
     gl.uniform3fv(l.u_Ellipsoids, flattenedEllipsoids);
-    gl.uniform3fv(l.u_Triangles, flattenedTriangles);
+    gl.uniform3fv(l.u_Triangles, triangles);
 
     // Issue #22: ResizeObserver alone handles canvas resizes — it fires whenever
     // the element's size changes, which covers window resizes too. The duplicate
