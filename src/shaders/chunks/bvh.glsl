@@ -70,10 +70,9 @@ BvhHit bvhClosestPrimitive(vec3 point, vec3 direction) {
                 float distance;
                 bool hit;
                 if(primIndex < TRIANGLE_COUNT) {
-                    Triangle triangle = triangleAt(primIndex);
-                    hit = triangleHitDistance(point, direction, triangle, closestDistance, distance);
+                    hit = triangleHitDistance(primIndex, point, direction, closestDistance, distance);
                 } else {
-                    hit = ellipsoidHitDistance(point, direction, ellipsoidAt(primIndex - TRIANGLE_COUNT), closestDistance, distance);
+                    hit = ellipsoidHitDistance(primIndex - TRIANGLE_COUNT, point, direction, closestDistance, distance);
                 }
                 if(hit && distance < closestDistance) {
                     closestDistance = distance;
@@ -129,11 +128,11 @@ bool bvhAnyHit(vec3 point, vec3 direction, float maxDistance) {
             for(int i = 0; i < primCount; i++) {
                 int primIndex = int(u_BvhPrimIndices[primStart + i].x + 0.5f);
                 if(primIndex < TRIANGLE_COUNT) {
-                    if(rayTriangleOccluded(point, direction, maxDistance, triangleAt(primIndex))) {
+                    if(rayTriangleOccluded(primIndex, point, direction, maxDistance)) {
                         return true;
                     }
                 } else {
-                    if(rayEllipsoidOccluded(point, direction, maxDistance, ellipsoidAt(primIndex - TRIANGLE_COUNT))) {
+                    if(rayEllipsoidOccluded(primIndex - TRIANGLE_COUNT, point, direction, maxDistance)) {
                         return true;
                     }
                 }
