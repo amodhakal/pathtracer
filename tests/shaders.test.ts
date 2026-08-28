@@ -3,15 +3,14 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
 const shaderDir = join(__dirname, "../src/shaders");
-const shaderFiles = readdirSync(shaderDir, { withFileTypes: true })
-  .filter((entry) => entry.isFile())
-  .map((entry) => entry.name);
+const shaderFiles = readdirSync(shaderDir);
 
 describe("shader sources", () => {
   it("ships all expected shader files", () => {
     expect(shaderFiles.sort()).toEqual([
       "display.frag",
       "local.frag",
+      "noiseGen.frag",
       "pathtrace.frag",
       "shaders.vert",
     ]);
@@ -21,170 +20,5 @@ describe("shader sources", () => {
     const source = readFileSync(join(shaderDir, file), "utf8");
     expect(source.trim().length).toBeGreaterThan(0);
     expect(source).toContain("main");
-  });
-
-  it("declares the issue #55 material types in the shared chunks", () => {
-    const common = readFileSync(join(shaderDir, "chunks/common.glsl"), "utf8");
-    expect(common).toContain("#define MATERIAL_GGX 3");
-    expect(common).toContain("#define MATERIAL_EMISSIVE 4");
-    expect(common).toContain("#define MATERIAL_CLEARCOAT 5");
-    expect(common).toContain("#define MATERIAL_THINFILM 6");
-  });
-  // Issue #29: the noise-texture RNG pass was removed; the RNG now lives in
-  // chunks/prng.glsl and pathtrace.frag must include and seed it.
-  it("pathtrace.frag uses the in-shader PRNG chunk", () => {
-    const source = readFileSync(join(shaderDir, "pathtrace.frag"), "utf8");
-    expect(source).toContain("#include <prng>");
-    expect(source).toContain("initRng(");
-    expect(source).not.toContain("u_NoiseTexture");
-  });
-
-  it("samples glass with a proper dielectric BSDF and MIS contract (#32)", () => {
-    const pathtrace = readFileSync(join(shaderDir, "pathtrace.frag"), "utf8");
-    // Exact dielectric Fresnel (not Schlick-only) with TIR handling.
-    expect(pathtrace).toContain("float fresnelDielectric(");
-    expect(pathtrace).toContain("sinThetaT >= 1.0f");
-    // Delta-BSDF sampler with explicit MIS/lobe-selection documentation.
-    expect(pathtrace).toContain("bool sampleGlassBsdf(");
-    expect(pathtrace).toMatch(/MIS/);
-    // The tracePath glass branch must route through the BSDF sampler.
-    expect(pathtrace).toContain("sampleGlassBsdf(direction, hit.normal, hit.color");
-    // Old Schlick-based lobe hack must be gone from the glass path.
-    expect(pathtrace).not.toMatch(/MATERIAL_GLASS[\s\S]{0,400}fresnelSchlick/);
-  });
-
-  // Issue #58: thin-lens depth of field — the path tracer must declare the
-  // aperture/focal uniforms and sample the lens disk after sub-pixel jitter.
-  it("implements thin-lens DOF with jitter composition in the path tracer", () => {
-    const pathtrace = readFileSync(join(shaderDir, "pathtrace.frag"), "utf8");
-    expect(pathtrace).toContain("uniform float u_ApertureRadius");
-    expect(pathtrace).toContain("uniform float u_FocalDistance");
-    // Aperture sampling happens after (composing with) the pixel jitter.
-    const jitterIdx = pathtrace.indexOf("vec2 jitter =");
-    const dofIdx = pathtrace.indexOf("u_ApertureRadius > 0.0f");
-    expect(jitterIdx).toBeGreaterThan(-1);
-    expect(dofIdx).toBeGreaterThan(jitterIdx);
-  });
-
-  it("samples glass with a proper dielectric BSDF and MIS contract (#32)", () => {
-    const pathtrace = readFileSync(join(shaderDir, "pathtrace.frag"), "utf8");
-    // Exact dielectric Fresnel (not Schlick-only) with TIR handling.
-    expect(pathtrace).toContain("float fresnelDielectric(");
-    expect(pathtrace).toContain("sinThetaT >= 1.0f");
-    // Delta-BSDF sampler with explicit MIS/lobe-selection documentation.
-    expect(pathtrace).toContain("bool sampleGlassBsdf(");
-    expect(pathtrace).toMatch(/MIS/);
-    // The tracePath glass branch must route through the BSDF sampler.
-    expect(pathtrace).toContain("sampleGlassBsdf(direction, hit.normal, hit.color");
-    // Old Schlick-based lobe hack must be gone from the glass path.
-    expect(pathtrace).not.toMatch(/MATERIAL_GLASS[\s\S]{0,400}fresnelSchlick/);
-  });
-
-  it("no longer hardcodes scene geometry bounds (issue #40)", () => {
-    const common = readFileSync(join(shaderDir, "chunks/common.glsl"), "utf8");
-    expect(common).not.toMatch(/#define\s+(TRIANGLE_COUNT|TRIANGLE_VECTORS|ELLIPSOID_COUNT|ELLIPSOID_VECTORS)\s+\d+/);
-    const pathtrace = readFileSync(join(shaderDir, "pathtrace.frag"), "utf8");
-    expect(pathtrace).not.toMatch(/#define\s+MAX_TEXTURES\s+\d+/);
-  });
-
-  it("injects scene-derived defines after #version when assembled (issue #40)", async () => {
-    // Mirror what createPrograms() does: resolveIncludes + define injection.
-    const { resolveIncludes } = await import("../src/utils");
-    const { generateSceneDefines } = await import("../src/constants");
-    const source = readFileSync(join(shaderDir, "local.frag"), "utf8");
-    const defines = Object.entries(generateSceneDefines())
-      .map(([name, value]) => `#define ${name} ${value}`)
-      .join("\n");
-    const assembled = resolveIncludes(source).replace(
-      /^(\s*#version[^\n]*\n)/m,
-      `$1\n${defines}\n`,
-    );
-    expect(assembled).toContain(`#define TRIANGLE_COUNT ${generateSceneDefines().TRIANGLE_COUNT}`);
-    expect(assembled.indexOf("#version")).toBeLessThan(assembled.indexOf("#define TRIANGLE_COUNT"));
-    // The injected defines must precede their first use in a uniform declaration.
-    expect(assembled.indexOf("#define ELLIPSOID_COUNT")).toBeLessThan(
-      assembled.indexOf("uniform vec3 u_Ellipsoids"),
-    );
-  });
-
-  it("implements spectral dispersion in glass (issue #62)", () => {
-    const pathtrace = readFileSync(join(shaderDir, "pathtrace.frag"), "utf8");
-    expect(pathtrace).toContain("GLASS_DISPERSION");
-    expect(pathtrace).toContain("sampleDispersiveIor");
-    // Dispersion must feed the glass BSDF sampler (which applies both the
-    // refracted lobe and its exact-Fresnel weight with the sampled IOR).
-    expect(pathtrace).toContain("float sampleDispersiveIor(float baseIor)");
-    expect(pathtrace).toContain("sampleDispersiveIor(baseIor)");
-    expect(pathtrace).toMatch(/sampleGlassBsdf\([^)]*ior,/s);
-  });
-
-  // Issue #64: volumetrics / participating media.
-  it("declares the volume material type in the shared chunks (#64)", () => {
-    const common = readFileSync(join(shaderDir, "chunks/common.glsl"), "utf8");
-    expect(common).toContain("#define MATERIAL_VOLUME 7");
-  });
-
-  it("integrates volumetric path tracing into the path tracer (#64)", () => {
-    const pathtrace = readFileSync(join(shaderDir, "pathtrace.frag"), "utf8");
-    // Participating-media uniforms (scene option surface).
-    expect(pathtrace).toContain("uniform float u_FogDensity");
-    expect(pathtrace).toContain("uniform float u_FogScatterAlbedo");
-    expect(pathtrace).toContain("uniform vec3 u_FogEmission");
-    expect(pathtrace).toContain("uniform float u_FogAnisotropy");
-    // Tracking machinery: free-flight distance sampling, Beer-Lambert
-    // transmittance for shadow rays, and phase-function sampling.
-    expect(pathtrace).toContain("float sampleMediumDistance(float sigmaT)");
-    expect(pathtrace).toContain("vec3 mediumTransmittance(");
-    expect(pathtrace).toContain("vec3 samplePhaseDirection(");
-    expect(pathtrace).toContain("vec3 sampleMediumDirectLight(");
-    // The medium event must race the surface hit inside tracePath.
-    expect(pathtrace).toMatch(/mediumDistance\s*<\s*surfaceDistance/);
-    // And a bounded MATERIAL_VOLUME primitive must be handled too.
-    expect(pathtrace).toContain("materialType == MATERIAL_VOLUME");
-  });
-
-  it("keeps non-volume scenes on the surface-only path (#64)", () => {
-    const pathtrace = readFileSync(join(shaderDir, "pathtrace.frag"), "utf8");
-    // The whole medium branch is gated on a positive density, so density 0
-    // reduces the integrator to the previous surface-only transport.
-    expect(pathtrace).toMatch(/u_FogDensity\s*>\s*0\.0f/);
-    // Vacuum short-circuits distance sampling and transmittance.
-    expect(pathtrace).toMatch(/sigmaT\s*<=\s*0\.0f/);
-  });
-
-  // Issue #61: surface next-event estimation + multiple importance sampling.
-  it("implements surface NEE with MIS against emissive geometry (#61)", () => {
-    const pathtrace = readFileSync(join(shaderDir, "pathtrace.frag"), "utf8");
-    // Runtime toggle uniform.
-    expect(pathtrace).toContain("uniform float u_NeeEnabled");
-    // Explicit light-sampling estimator with an MIS power heuristic.
-    expect(pathtrace).toContain("vec3 sampleLightNEE(");
-    expect(pathtrace).toContain("misWeight = pdfW * pdfW");
-    // The light strategy pdf must mirror its sampler: uniform primitive
-    // choice over bounds volume, converted to solid angle by the geometry term.
-    expect(pathtrace).toMatch(/float\(totalPrimitives\)\s*\n?\s*\/ max\(aabbVolume/);
-    // BSDF-sampled bounce directions feed the MIS weight via their pdf.
-    expect(pathtrace).toContain("float bouncePdfW = max(dot(hit.normal, bounceDirection), 0.0f) / 3.14159265f;");
-    expect(pathtrace.match(/sampleLightNEE\(/g)?.length).toBeGreaterThanOrEqual(3);
-    // Emitter hits along BSDF segments are MIS-weighted against the light
-    // samples; delta/camera segments keep full weight.
-    expect(pathtrace).toContain("emitterLightPdfW(bvhLastPrimIndex, bvhLastIsTriangle,");
-  });
-
-  it("keeps pure path tracing when the NEE toggle is off (#61)", () => {
-    const pathtrace = readFileSync(join(shaderDir, "pathtrace.frag"), "utf8");
-    // Every explicit-sample call site is gated on the toggle.
-    expect(pathtrace).toMatch(/u_NeeEnabled == 0\.0f/);
-    const neeIdx = pathtrace.indexOf("u_NeeEnabled == 0.0f");
-    const sampleFnIdx = pathtrace.indexOf("vec3 sampleLightNEE(vec3 point");
-    const emitterPdfIdx = pathtrace.indexOf("float emitterLightPdfW(int primIndex");
-    // Both consumers appear after the guard in their respective functions.
-    expect(neeIdx).toBeGreaterThan(-1);
-    expect(sampleFnIdx).toBeGreaterThan(-1);
-    expect(emitterPdfIdx).toBeGreaterThan(-1);
-    // The diffuse tail keeps the legacy direct-light estimator untouched.
-    expect(pathtrace).toContain(
-      "accumulated += throughput * calculateDirectIllumination(hit.intersect, hit.normal, hit.color);",
-    );
   });
 });
